@@ -34,6 +34,8 @@ class HybridSearcher:
     binary_store: Optional[BinaryVectorStore] = None
     redis_client: object | None = None
     cache_ttl_seconds: int = 3600
+    binary_first: bool = False
+    binary_candidates: int = 1000
 
     def search(self, query: str, top_k: int = 20) -> List[SearchResult]:
         # Cache check
@@ -47,6 +49,18 @@ class HybridSearcher:
         # Optimized candidate counts for faster search while maintaining quality
         search_k = min(100, top_k * 3)  # Adaptive candidate count based on requested top_k
 
+        # Optional: binary-first filtering to narrow candidates
+        candidate_cids: set[str] | None = None
+        if self.binary_first and self.binary_store and self.binary_store.has_data():
+            try:
+                bD, bI = self.binary_store.search(qvec, top_k=max(self.binary_candidates, search_k))
+                if bI.size and bI[0].size:
+                    rowids = [int(idx) for idx in bI[0].tolist() if int(idx) >= 0]
+                    cids = set(self.lexical_store.get_chunk_ids_by_rowid(rowids))
+                    candidate_cids = cids
+            except Exception:
+                candidate_cids = None
+
         vs_scores, vs_idxs = self.vector_store.search(qvec, top_k=search_k)
         vector_rank: List[Tuple[str, float]] = []
         if vs_idxs.size and vs_idxs[0].size:
@@ -54,6 +68,8 @@ class HybridSearcher:
             scrs = vs_scores[0].tolist()
             cids = self.lexical_store.get_chunk_ids_by_rowid(rowids)
             vector_rank = list(zip(cids, scrs))
+            if candidate_cids is not None:
+                vector_rank = [(cid, s) for cid, s in vector_rank if cid in candidate_cids]
 
         binary_rank: List[Tuple[str, float]] = []
         if self.binary_store and self.binary_store.has_data():
@@ -65,6 +81,8 @@ class HybridSearcher:
                 binary_rank = list(zip(cids, scores))
 
         lexical_rank = self.lexical_store.search(query, top_k=search_k)
+        if candidate_cids is not None:
+            lexical_rank = [(cid, s) for cid, s in lexical_rank if cid in candidate_cids]
 
         # Optimized fusion with reduced candidate pool for faster reranking
         fusion_candidates = min(25, top_k * 2)  # Fewer candidates for fusion

@@ -14,14 +14,23 @@ services:
       - FAISS_INDEX_PATH=/app/data/vectors.faiss
       - FAISS_BINARY_INDEX_PATH=/app/data/vectors.bin
       - FAISS_BINARY_IDS_PATH=/app/data/vectors.bin.ids.npy
+      - FAISS_IMAGE_INDEX_PATH=/app/data/vision.faiss
       - DOCS_DIR=/app/documents
       - PROMETHEUS_PORT=9108
+      # Vision + retrieval
+      - ENABLE_VISION=true
+      - ENABLE_CROSS_MODAL=true
+      - USE_BINARY_FILTER=true
+      - BINARY_FILTER_CANDIDATES=1000
+      - INVALIDATE_ON_REINDEX=true
       # LM Studio integration (optimized for bridge networking)
       - GENERATOR=lm_studio
       - LM_STUDIO_URL=http://host.docker.internal:1234/v1/chat/completions
       - LM_STUDIO_MODEL=google/gemma-3-12b
       - LM_STUDIO_TEMPERATURE=0.1
       - LM_STUDIO_MAX_TOKENS=1024
+      - LM_STUDIO_TIMEOUT=120
+      - LM_STUDIO_MAX_RETRIES=3
       # Redis cache (optional)
       - REDIS_URL=redis://redis:6379/0
       - CACHE_TTL_SECONDS=3600

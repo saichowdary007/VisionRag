@@ -48,19 +48,50 @@
 
       async function sendMessage(text) {
         appendMessage('user', text);
-        const thinking = document.createElement('div');
-        thinking.className = 'flex justify-start my-2';
-        thinking.innerHTML = '<div class="bg-white shadow rounded-2xl px-4 py-3 text-slate-500">Thinking…</div>';
-        chatBox.appendChild(thinking);
+        const wrap = document.createElement('div');
+        wrap.className = 'flex justify-start my-2';
+        const bubble = document.createElement('div');
+        bubble.className = 'bg-white shadow rounded-2xl px-4 py-3 max-w-[80%] whitespace-pre-wrap text-slate-800';
+        bubble.textContent = '';
+        wrap.appendChild(bubble);
+        chatBox.appendChild(wrap);
         chatBox.scrollTop = chatBox.scrollHeight;
         try {
-          const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, k: 5, rerank: true }) });
-          const data = await res.json();
-          thinking.remove();
-          appendMessage('assistant', data.response || '(no response)', data.citations || []);
+          const res = await fetch('/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, k: 5, rerank: true }) });
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let citations = [];
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            // Expect JSONL lines
+            const lines = chunk.split('\n').filter(Boolean);
+            for (const line of lines) {
+              try {
+                const obj = JSON.parse(line);
+                if (obj.token) {
+                  bubble.textContent += obj.token;
+                } else if (obj.done) {
+                  citations = obj.citations || [];
+                }
+              } catch (_) { /* ignore parse errors */ }
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+          }
+          if (citations.length) {
+            const cite = document.createElement('div');
+            cite.className = 'ml-2 mr-10 text-xs text-slate-500';
+            cite.innerHTML = citations.map((c, i) => `
+              <div class="mt-1 p-2 rounded-lg bg-slate-50 border border-slate-200">
+                <div class="font-medium text-slate-700">[${i+1}] ${c.doc_id} — p.${c.page}</div>
+                <div class="text-slate-600 mt-1 line-clamp-3">${c.snippet.replace(/</g,'&lt;')}</div>
+              </div>
+            `).join('');
+            chatBox.appendChild(cite);
+          }
         } catch (e) {
-          thinking.remove();
-          appendMessage('assistant', 'Error: ' + e.message);
+          bubble.textContent = 'Error: ' + e.message;
         }
       }
 
@@ -149,4 +180,3 @@
   </div>
 </body>
 </html>
-

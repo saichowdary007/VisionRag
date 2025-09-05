@@ -11,6 +11,7 @@ import faiss
 from ..config import get_config
 from ..ingestion.streaming_processor import StreamingDocumentProcessor
 from ..embeddings.text_embedder import OptimizedTextEmbedder
+from ..embeddings.image_embedder import SiglipImageEmbedder
 from ..search.binary_vector_store import float_to_binary
 
 
@@ -22,7 +23,8 @@ def ensure_schema(conn: sqlite3.Connection):
             doc_id TEXT,
             chunk_id TEXT PRIMARY KEY,
             page INTEGER,
-            text TEXT
+            text TEXT,
+            meta TEXT
         )
         """
     )
@@ -37,12 +39,22 @@ def ensure_schema(conn: sqlite3.Connection):
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS images (
+            image_id TEXT PRIMARY KEY,
+            doc_id TEXT,
+            page INTEGER,
+            path TEXT
+        )
+        """
+    )
     conn.commit()
 
 
 def _chunk_meta(c) -> Dict[str, Any]:
     meta = {}
-    for key in ("section", "subsection", "figure_id", "table_id"):
+    for key in ("section", "subsection", "figure_id", "table_id", "image_ids", "bbox"):
         val = getattr(c, key, None)
         if val:
             meta[key] = val
@@ -66,6 +78,23 @@ def insert_chunks(conn: sqlite3.Connection, chunks) -> List[int]:
         ids.append(rid)
     conn.commit()
     return ids
+
+
+def insert_images(conn: sqlite3.Connection, images: List[tuple[str, str, int, str, str]]) -> List[int]:
+    if not images:
+        return []
+    cur = conn.cursor()
+    for rec in images:
+        cur.execute(
+            "INSERT OR REPLACE INTO images(image_id, doc_id, page, path, bbox) VALUES (?, ?, ?, ?, ?)",
+            rec,
+        )
+    rowids: List[int] = []
+    for image_id, *_ in images:
+        cur.execute("SELECT rowid FROM images WHERE image_id=?", (image_id,))
+        rowids.append(cur.fetchone()[0])
+    conn.commit()
+    return rowids
 
 
 def build_faiss_index(embeddings: np.ndarray, ids: np.ndarray, out_path: Path) -> None:
@@ -96,6 +125,7 @@ def main() -> int:
     docs_dir = Path(cfg.docs_dir)
     db_path = Path(cfg.db_path)
     index_path = Path(cfg.faiss_index_path)
+    image_index_path = Path(cfg.faiss_image_index_path)
     bin_index_path = Path(cfg.faiss_binary_index_path)
     bin_ids_path = Path(cfg.faiss_binary_ids_path)
 
@@ -110,6 +140,7 @@ def main() -> int:
 
     processor = StreamingDocumentProcessor(max_memory_mb=4000)
     embedder = OptimizedTextEmbedder(cfg.text_embedding_model, device=cfg.device, batch_size=16)
+    img_embedder = SiglipImageEmbedder(cfg.siglip_model, device=cfg.device, batch_size=16) if cfg.enable_vision else None
 
     pdfs = sorted(list(docs_dir.glob("**/*.pdf")))
     if not pdfs:
@@ -118,6 +149,8 @@ def main() -> int:
 
     all_texts: List[str] = []
     all_rowids: List[int] = []
+    all_image_paths: List[str] = []
+    all_image_rowids: List[int] = []
 
     for pdf in pdfs:
         print(f"Processing {pdf}...")
@@ -125,6 +158,11 @@ def main() -> int:
         rowids = insert_chunks(conn, chunks)
         all_rowids.extend(rowids)
         all_texts.extend([c.text for c in chunks])
+        image_records = processor.extract_document_images(str(pdf))
+        if image_records:
+            i_rowids = insert_images(conn, image_records)
+            all_image_paths.extend([r[3] for r in image_records])
+            all_image_rowids.extend(i_rowids)
 
     if not all_texts:
         print("No text extracted from PDFs; aborting index build.")
@@ -147,6 +185,17 @@ def main() -> int:
     faiss.write_index_binary(bindex, str(bin_index_path))
     np.save(str(bin_ids_path), ids)
     print(f"Wrote binary index to {bin_index_path} and ids to {bin_ids_path}")
+
+    # Optional vision index
+    if cfg.enable_vision and all_image_paths and img_embedder is not None:
+        print(f"Embedding {len(all_image_paths)} images with {cfg.siglip_model} ...")
+        img_embs = img_embedder.embed_paths(all_image_paths)
+        if img_embs.shape[0] == len(all_image_rowids):
+            print("Building image FAISS index ...")
+            build_faiss_index(img_embs, np.array(all_image_rowids, dtype=np.int64), image_index_path)
+            print(f"Wrote image index to {image_index_path}")
+        else:
+            print("Warning: image embeddings count mismatch; skipping image index build.")
     return 0
 
 

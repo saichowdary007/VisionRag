@@ -7,6 +7,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..config import get_config
+from ..cache.redis_cache import get_client as get_redis_client
 
 # Resolve project root inside the container. This file lives at
 # /app/rag_service/admin/reindex.py, so parents[2] == /app.
@@ -28,6 +30,27 @@ class ReindexStatus:
 
 
 def start_reindex() -> ReindexStatus:
+    # Optional: invalidate cache before starting reindex
+    try:
+        cfg = get_config()
+        if cfg.invalidate_on_reindex and cfg.redis_url:
+            r = get_redis_client(cfg.redis_url)
+            if r is not None:
+                # Delete common prefixes
+                for pattern in ("search:v1:*", "chat:v1:*"):
+                    try:
+                        cursor = 0
+                        while True:
+                            cursor, keys = r.scan(cursor=cursor, match=pattern, count=500)
+                            if keys:
+                                r.delete(*keys)
+                            if cursor == 0:
+                                break
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
     if PID_FILE.exists():
         try:
             pid = int(PID_FILE.read_text().strip())

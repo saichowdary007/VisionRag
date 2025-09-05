@@ -43,10 +43,27 @@ class LexicalStore:
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS images (
+                image_id TEXT PRIMARY KEY,
+                doc_id TEXT,
+                page INTEGER,
+                path TEXT,
+                bbox TEXT
+            )
+            """
+        )
         self.conn.commit()
         # Try to add meta column in case of existing DBs without it
         try:
             cur.execute("ALTER TABLE chunks ADD COLUMN meta TEXT")
+            self.conn.commit()
+        except Exception:
+            pass
+        # Try to add bbox column to images if missing
+        try:
+            cur.execute("ALTER TABLE images ADD COLUMN bbox TEXT")
             self.conn.commit()
         except Exception:
             pass
@@ -83,3 +100,32 @@ class LexicalStore:
         cur = self.conn.cursor()
         cur.execute(f"SELECT chunk_id FROM chunks WHERE rowid IN ({qmarks})", rowids)
         return [r[0] for r in cur.fetchall()]
+
+    # --- Multimodal helpers ---
+    def get_chunks_by_doc_page(self, doc_id: str, page: int, limit: int = 5) -> List[Tuple[str, str, int, str]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT doc_id, chunk_id, page, text FROM chunks WHERE doc_id=? AND page=? LIMIT ?",
+            (doc_id, int(page), int(limit)),
+        )
+        return cur.fetchall()
+
+    def get_images_by_rowid(self, rowids: List[int]) -> List[Tuple[str, str, int, str]]:
+        """Return list of (image_id, doc_id, page, path) for given rowids, preserving order length."""
+        if not rowids:
+            return []
+        qmarks = ",".join(["?"] * len(rowids))
+        cur = self.conn.cursor()
+        cur.execute(f"SELECT rowid, image_id, doc_id, page, path FROM images WHERE rowid IN ({qmarks})", rowids)
+        rows = cur.fetchall()
+        # Map rowid->record and normalize to given order
+        by_id = {r[0]: (r[1], r[2], r[3], r[4]) for r in rows}
+        return [by_id.get(rid, ("", "", -1, "")) for rid in rowids]
+
+    def count_images(self) -> int:
+        cur = self.conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(1) FROM images")
+            return int(cur.fetchone()[0])
+        except Exception:
+            return 0

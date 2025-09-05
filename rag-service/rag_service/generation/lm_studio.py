@@ -7,6 +7,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from ..types import SearchResult
 
@@ -26,6 +27,7 @@ def _format_context(chunks: List[SearchResult], max_chars: int = 2500) -> str:
 
 
 _session: requests.Session | None = None
+_async_client: httpx.AsyncClient | None = None
 
 
 def _get_session() -> requests.Session:
@@ -53,6 +55,15 @@ def _get_session() -> requests.Session:
     return _session
 
 
+def _get_async_client(timeout_s: int = 120) -> httpx.AsyncClient:
+    global _async_client
+    if _async_client is None:
+        limits = httpx.Limits(max_connections=10, max_keepalive_connections=5)
+        _async_client = httpx.AsyncClient(timeout=timeout_s, limits=limits)
+    return _async_client
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0), reraise=True)
 def generate_with_lm_studio(
     url: str,
     model: str,
@@ -97,6 +108,7 @@ def generate_with_lm_studio(
 
 
 # Async version for better performance
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0), reraise=True)
 async def generate_with_lm_studio_async(
     url: str,
     model: str,
@@ -133,9 +145,60 @@ async def generate_with_lm_studio_async(
         "stream": False,
     }
 
-    async with httpx.AsyncClient(timeout=timeout_s) as client:
-        resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
+    client = _get_async_client(timeout_s)
+    resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    return content.strip(), data
+
+
+async def generate_with_lm_studio_stream(
+    url: str,
+    model: str,
+    user_query: str,
+    chunks: List[SearchResult],
+    temperature: float = 0.1,
+    max_tokens: int = 1024,
+    system_prompt: str | None = None,
+    timeout_s: int = 120,
+):
+    """Async generator yielding streamed tokens from LM Studio compatible API."""
+    if not system_prompt:
+        system_prompt = (
+            "You are a retrieval-augmented assistant that answers using ONLY the provided context. "
+            "Documents can be from any domain. For each factual claim, add citations as (Doc, p.X) or (Doc, Section) when page is unknown. "
+            "If the context is insufficient, reply exactly: 'Information not found in provided documents.' "
+            "Prefer concise, stepwise instructions when the user asks for procedures; preserve units, warnings, and exact terminology. Avoid speculation."
+        )
+
+    context = _format_context(chunks)
+    prompt = (
+        "Use ONLY the provided context. For every claim, add citations.\n\n"
+        f"Context:\n{context}\n\nQuestion: {user_query}\n\nAnswer with citations:"
+    )
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": float(temperature),
+        "max_tokens": int(max_tokens),
+        "stream": True,
+    }
+
+    client = _get_async_client(timeout_s)
+    async with client.stream("POST", url, headers={"Content-Type": "application/json"}, json=payload) as resp:
         resp.raise_for_status()
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return content.strip(), data
+        async for line in resp.aiter_lines():
+            if not line:
+                continue
+            try:
+                obj = json.loads(line.replace("data: ", ""))
+                delta = obj.get("choices", [{}])[0].get("delta", {}).get("content")
+                if delta:
+                    yield delta
+            except Exception:
+                continue

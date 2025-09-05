@@ -13,6 +13,8 @@ MEMORY_USAGE = Gauge('memory_usage_mb', 'Memory usage in MB', registry=registry)
 GPU_ALLOC_MB = Gauge('gpu_allocated_mb', 'GPU allocated (MB)', registry=registry)
 GPU_CACHED_MB = Gauge('gpu_cached_mb', 'GPU cached (MB)', registry=registry)
 QUERY_LATENCY = Histogram('query_latency_seconds', 'Query latency', registry=registry)
+LM_STUDIO_UP = Gauge('lm_studio_up', 'LM Studio availability (1=up)', registry=registry)
+LM_STUDIO_LATENCY = Histogram('lm_studio_latency_seconds', 'LM Studio latency', registry=registry)
 
 
 @dataclass
@@ -44,4 +46,3 @@ class PerformanceMonitor:
         self.get_memory_usage()
         self.update_gpu()
         return exposition.generate_latest(registry)
-
