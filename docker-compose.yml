@@ -1,0 +1,76 @@
+services:
+  rag-service:
+    build:
+      context: ./rag-service
+      dockerfile: Dockerfile.m1
+    ports:
+      - "8001:8001"
+    # Use bridge network with optimizations for macOS compatibility
+    environment:
+      - DEVICE=mps
+      - MAX_MEMORY_GB=8
+      - MODEL_CACHE_DIR=/models
+      - DB_PATH=/app/data/documents.db
+      - FAISS_INDEX_PATH=/app/data/vectors.faiss
+      - FAISS_BINARY_INDEX_PATH=/app/data/vectors.bin
+      - FAISS_BINARY_IDS_PATH=/app/data/vectors.bin.ids.npy
+      - DOCS_DIR=/app/documents
+      - PROMETHEUS_PORT=9108
+      # LM Studio integration (optimized for bridge networking)
+      - GENERATOR=lm_studio
+      - LM_STUDIO_URL=http://host.docker.internal:1234/v1/chat/completions
+      - LM_STUDIO_MODEL=google/gemma-3-12b
+      - LM_STUDIO_TEMPERATURE=0.1
+      - LM_STUDIO_MAX_TOKENS=1024
+      # Redis cache (optional)
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_TTL_SECONDS=3600
+    volumes:
+      - model_cache:/models
+      - ./config:/app/config
+      - ./rag-service/documents:/app/documents
+      - rag_data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 10G
+          cpus: '6.0'
+
+  redis:
+    image: redis:7-alpine
+    profiles: [cache]
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--maxmemory", "2048mb", "--maxmemory-policy", "allkeys-lru"]
+
+  nginx:
+    image: nginx:alpine
+    profiles: [edge]
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - rag-service
+
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: [metrics]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=7d'
+    deploy:
+      resources:
+        limits:
+          memory: 500M
+          cpus: '0.5'
+
+volumes:
+  model_cache:
+  rag_data:
+  prometheus_data:

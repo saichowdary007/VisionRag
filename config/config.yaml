@@ -1,0 +1,9 @@
+device: mps
+max_memory_gb: 8
+db_path: ./rag-service/data/documents.db
+faiss_index_path: ./rag-service/data/vectors.faiss
+docs_dir: ./rag-service/documents
+prometheus_port: 9108
+text_embedding_model: nomic-ai/nomic-embed-text-v1.5
+reranker_model: BAAI/bge-reranker-base
+siglip_model: google/siglip-base-patch16-224
