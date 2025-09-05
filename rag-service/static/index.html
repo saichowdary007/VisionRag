@@ -2,181 +2,251 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Vision RAG Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VisionRAG Chat</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    .glass { backdrop-filter: saturate(180%) blur(16px); background: rgba(255,255,255,0.6); }
+    :root { color-scheme: light; }
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .container { max-width: 900px; }
     .scrollbar::-webkit-scrollbar { width: 8px; }
     .scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 8px; }
+    .bubble { border-radius: 16px; }
+    .msg { word-wrap: break-word; white-space: pre-wrap; }
+    .prose p { margin: 0.35rem 0; }
   </style>
+</head>
+<body class="bg-neutral-50 text-neutral-800">
+  <div class="container mx-auto h-screen flex flex-col">
+    <!-- Top bar -->
+    <header class="flex items-center justify-between gap-3 py-3 px-3">
+      <div class="flex items-center gap-2">
+        <div class="h-8 w-8 rounded-lg bg-indigo-600 text-white grid place-items-center text-sm font-semibold">VR</div>
+        <div class="text-sm text-neutral-600">VisionRAG</div>
+        <div id="status" class="ml-2 text-xs text-neutral-500">Ready</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="new-chat-btn" class="px-3 py-2 text-sm border border-neutral-200 rounded-lg bg-white hover:bg-neutral-50">New Chat</button>
+        <button id="clear-chat-btn" class="px-3 py-2 text-sm border border-neutral-200 rounded-lg bg-white hover:bg-neutral-50">Clear</button>
+        <div class="relative">
+          <button id="options-btn" class="px-3 py-2 text-sm border border-neutral-200 rounded-lg bg-white hover:bg-neutral-50">Options</button>
+          <div id="options-panel" class="hidden absolute right-0 mt-2 w-72 bg-white border border-neutral-200 rounded-xl shadow-md p-3 text-sm z-10">
+            <div class="font-medium text-neutral-700 mb-2">Retrieval</div>
+            <label class="flex items-center justify-between mb-2">
+              <span>Multi-Query (RAG-Fusion)</span>
+              <input id="multi-query" type="checkbox" class="h-4 w-4" />
+            </label>
+            <label class="flex items-center justify-between mb-2">
+              <span>Expansions</span>
+              <input id="expansions" type="number" min="1" max="6" value="3" class="w-20 border border-neutral-200 rounded-lg px-2 py-1" />
+            </label>
+            <label class="flex items-center justify-between mb-3">
+              <span>Top K</span>
+              <input id="top-k" type="number" min="1" max="10" value="5" class="w-20 border border-neutral-200 rounded-lg px-2 py-1" />
+            </label>
+            <div class="border-t pt-3 mt-2">
+              <div class="font-medium text-neutral-700 mb-2">Documents</div>
+              <input id="upload-input" type="file" accept="application/pdf" class="block w-full text-sm" />
+              <div class="flex gap-2 mt-2">
+                <button id="upload-btn" class="flex-1 px-3 py-2 text-sm rounded-lg bg-neutral-800 text-white hover:brightness-110">Upload</button>
+                <button id="reindex-btn" class="flex-1 px-3 py-2 text-sm rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50">Rebuild</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Chat area -->
+    <main id="chat-box" class="scrollbar flex-1 overflow-y-auto px-3 pb-24">
+      <!-- Messages will be appended here -->
+    </main>
+
+    <!-- Composer -->
+    <footer class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-neutral-50 to-neutral-50/70">
+      <div class="container mx-auto px-3 py-3">
+        <form id="chat-form" class="flex items-end gap-2">
+          <textarea id="chat-input" rows="1" placeholder="Message VisionRAG…" class="flex-1 resize-none rounded-xl border border-neutral-200 px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-200 bg-white"></textarea>
+          <button class="px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm hover:brightness-110">Send</button>
+        </form>
+        <div class="text-[11px] text-neutral-500 mt-1">Press Enter to send • Shift+Enter for new line</div>
+      </div>
+    </footer>
+  </div>
+
   <script>
     window.addEventListener('DOMContentLoaded', () => {
+      // Session handling
+      let sessionId = localStorage.getItem('session_id');
+      if (!sessionId) {
+        sessionId = (crypto.randomUUID ? crypto.randomUUID() : 'sid-' + Math.random().toString(36).slice(2));
+        localStorage.setItem('session_id', sessionId);
+      }
+
+      const chatBox = document.getElementById('chat-box');
       const chatForm = document.getElementById('chat-form');
       const chatInput = document.getElementById('chat-input');
-      const chatBox = document.getElementById('chat-box');
+      const statusEl = document.getElementById('status');
+      const optionsBtn = document.getElementById('options-btn');
+      const optionsPanel = document.getElementById('options-panel');
+      const newChatBtn = document.getElementById('new-chat-btn');
+      const clearChatBtn = document.getElementById('clear-chat-btn');
       const uploadInput = document.getElementById('upload-input');
       const uploadBtn = document.getElementById('upload-btn');
       const reindexBtn = document.getElementById('reindex-btn');
-      const statusEl = document.getElementById('status');
+
+      function toggleOptions() { optionsPanel.classList.toggle('hidden'); }
+      optionsBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleOptions(); });
+      document.addEventListener('click', (e) => { if (!optionsPanel.contains(e.target) && e.target !== optionsBtn) optionsPanel.classList.add('hidden'); });
 
       function appendMessage(role, content, citations=[]) {
-        const wrap = document.createElement('div');
-        wrap.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} my-2`;
+        const row = document.createElement('div');
+        row.className = 'w-full py-3';
         const bubble = document.createElement('div');
-        bubble.className = `${role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white text-slate-800'} shadow rounded-2xl px-4 py-3 max-w-[80%] whitespace-pre-wrap`;
-        bubble.innerText = content;
-        wrap.appendChild(bubble);
-        chatBox.appendChild(wrap);
-        if (citations && citations.length) {
+        if (role === 'user') {
+          bubble.className = 'ml-auto max-w-[80%] bubble bg-indigo-600 text-white px-4 py-3 msg shadow';
+        } else {
+          bubble.className = 'mr-auto max-w-[80%] bubble bg-white text-neutral-800 border border-neutral-200 px-4 py-3 msg shadow-sm';
+        }
+        bubble.textContent = content;
+        row.appendChild(bubble);
+        chatBox.appendChild(row);
+        if (role !== 'user' && citations && citations.length) {
           const cite = document.createElement('div');
-          cite.className = 'ml-2 mr-10 text-xs text-slate-500';
-          cite.innerHTML = citations.map((c, i) => `
-            <div class="mt-1 p-2 rounded-lg bg-slate-50 border border-slate-200">
-              <div class="font-medium text-slate-700">[${i+1}] ${c.doc_id} — p.${c.page}</div>
-              <div class="text-slate-600 mt-1 line-clamp-3">${c.snippet.replace(/</g,'&lt;')}</div>
-            </div>
-          `).join('');
+          cite.className = 'mr-auto max-w-[80%] text-xs text-neutral-500 mt-1 space-y-1';
+          cite.innerHTML = citations.map((c,i)=>`
+            <div class="p-2 rounded-lg bg-neutral-50 border border-neutral-200">
+              <div class="font-medium text-neutral-700">[${i+1}] ${c.doc_id} — p.${c.page}</div>
+              <div class="text-neutral-600 mt-1">${(c.snippet||'').replace(/</g,'&lt;')}</div>
+            </div>`).join('');
           chatBox.appendChild(cite);
         }
         chatBox.scrollTop = chatBox.scrollHeight;
       }
 
+      function appendThinking() {
+        const row = document.createElement('div');
+        row.className = 'w-full py-3';
+        const bubble = document.createElement('div');
+        bubble.className = 'mr-auto max-w-[80%] bubble bg-white text-neutral-800 border border-neutral-200 px-4 py-3 msg shadow-sm';
+        bubble.innerHTML = '<div class="flex items-center gap-2"><div class="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div><span class="text-neutral-500">Thinking…</span></div>';
+        row.appendChild(bubble);
+        chatBox.appendChild(row);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        return bubble;
+      }
+
       async function sendMessage(text) {
         appendMessage('user', text);
-        const wrap = document.createElement('div');
-        wrap.className = 'flex justify-start my-2';
-        const bubble = document.createElement('div');
-        bubble.className = 'bg-white shadow rounded-2xl px-4 py-3 max-w-[80%] whitespace-pre-wrap text-slate-800';
-        bubble.textContent = '';
-        wrap.appendChild(bubble);
-        chatBox.appendChild(wrap);
-        chatBox.scrollTop = chatBox.scrollHeight;
+        const bubble = appendThinking();
         try {
-          const res = await fetch('/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, k: 5, rerank: true }) });
+          const multiQuery = document.getElementById('multi-query').checked;
+          const expansions = parseInt(document.getElementById('expansions').value || '3', 10);
+          const topK = parseInt(document.getElementById('top-k').value || '5', 10);
+          const res = await fetch('/chat/stream', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, k: topK, rerank: true, multi_query: multiQuery, expansions, session_id: sessionId })
+          });
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
           let citations = [];
+          let responseStarted = false;
+          let buffer = '';
           while (true) {
             const { value, done } = await reader.read();
             if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            // Expect JSONL lines
-            const lines = chunk.split('\n').filter(Boolean);
-            for (const line of lines) {
+            buffer += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf('\n')) !== -1) {
+              const line = buffer.slice(0, idx).trim();
+              buffer = buffer.slice(idx + 1);
+              if (!line) continue;
               try {
                 const obj = JSON.parse(line);
                 if (obj.token) {
+                  if (!responseStarted) { bubble.innerHTML = ''; responseStarted = true; }
                   bubble.textContent += obj.token;
-                } else if (obj.done) {
-                  citations = obj.citations || [];
                 }
-              } catch (_) { /* ignore parse errors */ }
+                if (obj.done) { citations = obj.citations || []; }
+              } catch (_) {}
             }
             chatBox.scrollTop = chatBox.scrollHeight;
           }
+          if (!responseStarted) {
+            bubble.innerHTML = '';
+            bubble.textContent = 'No answer returned. Try rephrasing your query or rebuilding the index.';
+          }
           if (citations.length) {
             const cite = document.createElement('div');
-            cite.className = 'ml-2 mr-10 text-xs text-slate-500';
-            cite.innerHTML = citations.map((c, i) => `
-              <div class="mt-1 p-2 rounded-lg bg-slate-50 border border-slate-200">
-                <div class="font-medium text-slate-700">[${i+1}] ${c.doc_id} — p.${c.page}</div>
-                <div class="text-slate-600 mt-1 line-clamp-3">${c.snippet.replace(/</g,'&lt;')}</div>
-              </div>
-            `).join('');
+            cite.className = 'mr-auto max-w-[80%] text-xs text-neutral-500 mt-1 space-y-1';
+            cite.innerHTML = citations.map((c,i)=>`
+              <div class="p-2 rounded-lg bg-neutral-50 border border-neutral-200">
+                <div class="font-medium text-neutral-700">[${i+1}] ${c.doc_id} — p.${c.page}</div>
+                <div class="text-neutral-600 mt-1">${(c.snippet||'').replace(/</g,'&lt;')}</div>
+              </div>`).join('');
             chatBox.appendChild(cite);
           }
         } catch (e) {
+          bubble.innerHTML = '';
           bubble.textContent = 'Error: ' + e.message;
         }
       }
+
+      // Auto-resize input, Enter to send
+      chatInput.addEventListener('input', () => {
+        chatInput.style.height = 'auto';
+        chatInput.style.height = Math.min(160, chatInput.scrollHeight) + 'px';
+      });
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatForm.requestSubmit(); }
+      });
 
       chatForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const text = chatInput.value.trim();
         if (!text) return;
         chatInput.value = '';
+        chatInput.style.height = 'auto';
         sendMessage(text);
       });
 
+      // New Chat / Clear
+      newChatBtn.addEventListener('click', () => {
+        sessionId = (crypto.randomUUID ? crypto.randomUUID() : 'sid-' + Math.random().toString(36).slice(2));
+        localStorage.setItem('session_id', sessionId);
+        chatBox.innerHTML = '';
+        appendMessage('assistant', 'New chat started.');
+      });
+      clearChatBtn.addEventListener('click', async () => {
+        try { await fetch('/chat/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_id: sessionId }) }); } catch {}
+        chatBox.innerHTML = '';
+        appendMessage('assistant', 'History cleared for this chat.');
+      });
+
+      // Upload / Reindex
       uploadBtn.addEventListener('click', async () => {
         const file = uploadInput.files && uploadInput.files[0];
         if (!file) { statusEl.textContent = 'Choose a PDF first.'; return; }
-        const fd = new FormData();
-        fd.append('file', file);
+        const fd = new FormData(); fd.append('file', file);
         statusEl.textContent = 'Uploading…';
         try {
-          const res = await fetch('/ingest', { method: 'POST', body: fd });
-          const data = await res.json();
+          await fetch('/ingest', { method: 'POST', body: fd });
           statusEl.textContent = 'Uploaded. Rebuilding index…';
           await fetch('/admin/reindex', { method: 'POST' });
-          statusEl.textContent = 'Reindex started. You can continue chatting.';
-        } catch (e) {
-          statusEl.textContent = 'Upload failed: ' + e.message;
-        }
+          statusEl.textContent = 'Reindex started.';
+        } catch (e) { statusEl.textContent = 'Upload failed: ' + e.message; }
       });
-
       reindexBtn.addEventListener('click', async () => {
         statusEl.textContent = 'Rebuilding index…';
-        try {
-          await fetch('/admin/reindex', { method: 'POST' });
-          statusEl.textContent = 'Reindex started.';
-        } catch (e) {
-          statusEl.textContent = 'Reindex failed: ' + e.message;
-        }
+        try { await fetch('/admin/reindex', { method: 'POST' }); statusEl.textContent = 'Reindex started.'; }
+        catch (e) { statusEl.textContent = 'Reindex failed: ' + e.message; }
       });
 
-      // greet
-      appendMessage('assistant', 'Hi! Upload PDFs and ask questions about them.');
+      // Greeting
+      appendMessage('assistant', 'Hi! Ask a question about your manuals.');
     });
   </script>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
-  </head>
-<body class="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-sky-50">
-  <div class="max-w-5xl mx-auto p-4 lg:p-6">
-    <header class="flex items-center justify-between mb-4">
-      <div class="flex items-center gap-3">
-        <div class="h-10 w-10 rounded-xl bg-indigo-600 text-white grid place-items-center text-xl shadow">R</div>
-        <div>
-          <div class="text-lg font-semibold text-slate-800">Vision RAG Chat</div>
-          <div class="text-sm text-slate-500">Multimodal, high-performance</div>
-        </div>
-      </div>
-      <div class="glass border border-white/60 shadow rounded-xl px-3 py-2 text-sm text-slate-600" id="status">Ready</div>
-    </header>
-
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <section class="lg:col-span-2 bg-white shadow rounded-2xl border border-slate-100 flex flex-col h-[70vh]">
-        <div id="chat-box" class="scrollbar flex-1 overflow-y-auto p-4"></div>
-        <form id="chat-form" class="p-3 border-t border-slate-100 flex gap-2">
-          <input id="chat-input" type="text" placeholder="Ask about your documents…" class="flex-1 rounded-xl border border-slate-200 px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-200" />
-          <button class="bg-indigo-600 text-white px-4 py-3 rounded-xl shadow hover:brightness-110 active:scale-[0.99]">Send</button>
-        </form>
-      </section>
-
-      <aside class="bg-white shadow rounded-2xl border border-slate-100 p-4 h-[70vh] flex flex-col">
-        <div class="font-semibold text-slate-800 mb-2">Documents</div>
-        <div class="text-sm text-slate-500 mb-3">Upload PDFs to index them for search and chat.</div>
-        <input id="upload-input" type="file" accept="application/pdf" class="mb-2" />
-        <div class="flex gap-2">
-          <button id="upload-btn" class="flex-1 bg-slate-800 text-white px-3 py-2 rounded-lg hover:brightness-110">Upload</button>
-          <button id="reindex-btn" class="flex-1 bg-slate-200 text-slate-800 px-3 py-2 rounded-lg hover:bg-slate-300">Rebuild Index</button>
-        </div>
-        <div class="text-xs text-slate-500 mt-3">Note: Rebuild trains/search index; can take a minute depending on corpus size.</div>
-        <div class="mt-6 text-sm text-slate-600">
-          <div class="font-medium mb-1">Tips</div>
-          <ul class="list-disc ml-4 space-y-1">
-            <li>Ask precise, technical questions.</li>
-            <li>Include keywords from your docs.</li>
-            <li>Use the Rebuild button after uploads.</li>
-          </ul>
-        </div>
-      </aside>
-    </div>
-  </div>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💬</text></svg>">
 </body>
 </html>

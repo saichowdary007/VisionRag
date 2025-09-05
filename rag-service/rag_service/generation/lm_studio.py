@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict, Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -73,27 +73,43 @@ def generate_with_lm_studio(
     max_tokens: int = 1024,
     system_prompt: str | None = None,
     timeout_s: int = 120,  # Increased from 15s to 120s for large models
+    history_messages: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, dict]:
     if not system_prompt:
         system_prompt = (
-            "You are a retrieval-augmented assistant that answers using ONLY the provided context. "
-            "Documents can be from any domain. For each factual claim, add citations as (Doc, p.X) or (Doc, Section) when page is unknown. "
-            "If the context is insufficient, reply exactly: 'Information not found in provided documents.' "
-            "Prefer concise, stepwise instructions when the user asks for procedures; preserve units, warnings, and exact terminology. Avoid speculation."
+            "You are an expert technical assistant. Use ONLY the provided manual pages as ground truth. "
+            "Always be precise, cautious, and practical. Avoid speculation. "
+            "Cite sources using [n] where n corresponds to the context block indices. "
+            "If the context is insufficient, provide a graceful, helpful fallback as instructed."
         )
 
     context = _format_context(chunks)
     prompt = (
-        "Use ONLY the provided context. For every claim, add citations.\n\n"
-        f"Context:\n{context}\n\nQuestion: {user_query}\n\nAnswer with citations:"
+        "Use ONLY the provided context. For every claim, add citations like [1], [2].\n\n"
+        f"Context:\n{context}\n\nQuestion: {user_query}\n\n"
+        "Output format (Markdown):\n"
+        "- Summary: one sentence answer.\n"
+        "- Steps: numbered, actionable steps (use bold for key terms).\n"
+        "- Notes: important cautions, prerequisites, units, part numbers.\n"
+        "- Sources: bracketed citations e.g., [1], [3].\n\n"
+        "If context is insufficient: say 'Context insufficient to answer.' then provide 2-3 suggestions to refine the query (e.g., add model, part number, error code)."
     )
+
+    messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+    ]
+    # Optional chat history, already formatted as {role, content}
+    if history_messages:
+        for m in history_messages:
+            r = m.get("role")
+            c = m.get("content")
+            if r in ("user", "assistant") and isinstance(c, str) and c:
+                messages.append({"role": r, "content": c})
+    messages.append({"role": "user", "content": prompt})
 
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
+        "messages": messages,
         "temperature": float(temperature),
         "max_tokens": int(max_tokens),
         "stream": False,
@@ -118,28 +134,43 @@ async def generate_with_lm_studio_async(
     max_tokens: int = 1024,
     system_prompt: str | None = None,
     timeout_s: int = 120,
+    history_messages: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[str, dict]:
     """Async version of generate_with_lm_studio for better performance"""
     if not system_prompt:
         system_prompt = (
-            "You are a retrieval-augmented assistant that answers using ONLY the provided context. "
-            "Documents can be from any domain. For each factual claim, add citations as (Doc, p.X) or (Doc, Section) when page is unknown. "
-            "If the context is insufficient, reply exactly: 'Information not found in provided documents.' "
-            "Prefer concise, stepwise instructions when the user asks for procedures; preserve units, warnings, and exact terminology. Avoid speculation."
+            "You are an expert technical assistant. Use ONLY the provided manual pages as ground truth. "
+            "Always be precise, cautious, and practical. Avoid speculation. "
+            "Cite sources using [n] where n corresponds to the context block indices. "
+            "If the context is insufficient, provide a graceful, helpful fallback as instructed."
         )
 
     context = _format_context(chunks)
     prompt = (
-        "Use ONLY the provided context. For every claim, add citations.\n\n"
-        f"Context:\n{context}\n\nQuestion: {user_query}\n\nAnswer with citations:"
+        "Use ONLY the provided context. For every claim, add citations like [1], [2].\n\n"
+        f"Context:\n{context}\n\nQuestion: {user_query}\n\n"
+        "Output format (Markdown):\n"
+        "- Summary: one sentence answer.\n"
+        "- Steps: numbered, actionable steps (use bold for key terms).\n"
+        "- Notes: important cautions, prerequisites, units, part numbers.\n"
+        "- Sources: bracketed citations e.g., [1], [3].\n\n"
+        "If context is insufficient: say 'Context insufficient to answer.' then provide 2-3 suggestions to refine the query (e.g., add model, part number, error code)."
     )
+
+    messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+    ]
+    if history_messages:
+        for m in history_messages:
+            r = m.get("role")
+            c = m.get("content")
+            if r in ("user", "assistant") and isinstance(c, str) and c:
+                messages.append({"role": r, "content": c})
+    messages.append({"role": "user", "content": prompt})
 
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
+        "messages": messages,
         "temperature": float(temperature),
         "max_tokens": int(max_tokens),
         "stream": False,
@@ -162,28 +193,43 @@ async def generate_with_lm_studio_stream(
     max_tokens: int = 1024,
     system_prompt: str | None = None,
     timeout_s: int = 120,
+    history_messages: Optional[List[Dict[str, Any]]] = None,
 ):
     """Async generator yielding streamed tokens from LM Studio compatible API."""
     if not system_prompt:
         system_prompt = (
-            "You are a retrieval-augmented assistant that answers using ONLY the provided context. "
-            "Documents can be from any domain. For each factual claim, add citations as (Doc, p.X) or (Doc, Section) when page is unknown. "
-            "If the context is insufficient, reply exactly: 'Information not found in provided documents.' "
-            "Prefer concise, stepwise instructions when the user asks for procedures; preserve units, warnings, and exact terminology. Avoid speculation."
+            "You are an expert technical assistant. Use ONLY the provided manual pages as ground truth. "
+            "Always be precise, cautious, and practical. Avoid speculation. "
+            "Cite sources using [n] where n corresponds to the context block indices. "
+            "If the context is insufficient, provide a graceful, helpful fallback as instructed."
         )
 
     context = _format_context(chunks)
     prompt = (
-        "Use ONLY the provided context. For every claim, add citations.\n\n"
-        f"Context:\n{context}\n\nQuestion: {user_query}\n\nAnswer with citations:"
+        "Use ONLY the provided context. For every claim, add citations like [1], [2].\n\n"
+        f"Context:\n{context}\n\nQuestion: {user_query}\n\n"
+        "Output format (Markdown):\n"
+        "- Summary: one sentence answer.\n"
+        "- Steps: numbered, actionable steps (use bold for key terms).\n"
+        "- Notes: important cautions, prerequisites, units, part numbers.\n"
+        "- Sources: bracketed citations e.g., [1], [3].\n\n"
+        "If context is insufficient: say 'Context insufficient to answer.' then provide 2-3 suggestions to refine the query (e.g., add model, part number, error code)."
     )
+
+    messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+    ]
+    if history_messages:
+        for m in history_messages:
+            r = m.get("role")
+            c = m.get("content")
+            if r in ("user", "assistant") and isinstance(c, str) and c:
+                messages.append({"role": r, "content": c})
+    messages.append({"role": "user", "content": prompt})
 
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
+        "messages": messages,
         "temperature": float(temperature),
         "max_tokens": int(max_tokens),
         "stream": True,

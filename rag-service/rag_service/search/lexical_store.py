@@ -74,6 +74,11 @@ class LexicalStore:
         # Sanitize to basic tokens and escape quotes.
         sanitized = "".join(ch if (ch.isalnum() or ch.isspace()) else " " for ch in query)
         q = sanitized.replace("'", "''").strip()
+
+        # Handle empty queries that would cause FTS5 syntax errors
+        if not q:
+            return []
+
         limit = max(1, min(int(top_k), 1000))
         sql = (
             "SELECT chunk_id, bm25(chunks_fts) AS score "

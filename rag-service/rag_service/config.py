@@ -49,6 +49,24 @@ class Config:
     binary_filter_candidates: int = int(os.getenv("BINARY_FILTER_CANDIDATES", "1000"))
     cross_modal_weight: float = float(os.getenv("CROSS_MODAL_WEIGHT", "0.3"))
 
+    # query fusion (RAG-Fusion)
+    enable_query_fusion: bool = os.getenv("ENABLE_QUERY_FUSION", "false").lower() in ("1", "true", "yes")
+    query_expansions: int = int(os.getenv("QUERY_EXPANSIONS", "3"))
+    query_fusion_rrf_k: int = int(os.getenv("QUERY_FUSION_RRF_K", "60"))
+    query_expansion_temperature: float = float(os.getenv("QUERY_EXPANSION_TEMPERATURE", "0.2"))
+
+    # retrieval candidates tuning
+    rerank_candidates: int = int(os.getenv("RERANK_CANDIDATES", "50"))
+    search_k_max: int = int(os.getenv("SEARCH_K_MAX", "100"))
+    search_k_multiplier: int = int(os.getenv("SEARCH_K_MULTIPLIER", "3"))
+    image_search_topk: int = int(os.getenv("IMAGE_SEARCH_TOPK", "60"))
+
+    # vision reranker (optional CLIP)
+    enable_vision_reranker: bool = os.getenv("ENABLE_VISION_RERANKER", "false").lower() in ("1", "true", "yes")
+    vision_reranker_model: str = os.getenv("VISION_RERANKER_MODEL", "openai/clip-vit-base-patch32")
+    vision_rerank_weight: float = float(os.getenv("VISION_RERANK_WEIGHT", "0.7"))
+    vision_rerank_max_images: int = int(os.getenv("VISION_RERANK_MAX_IMAGES", "12"))
+
     @staticmethod
     def from_yaml(path: str | Path) -> "Config":
         cfg = Config()
@@ -81,6 +99,18 @@ class Config:
                 "binary_filter_candidates": "BINARY_FILTER_CANDIDATES",
                 "cross_modal_weight": "CROSS_MODAL_WEIGHT",
                 "invalidate_on_reindex": "INVALIDATE_ON_REINDEX",
+                "enable_query_fusion": "ENABLE_QUERY_FUSION",
+                "query_expansions": "QUERY_EXPANSIONS",
+                "query_fusion_rrf_k": "QUERY_FUSION_RRF_K",
+                "query_expansion_temperature": "QUERY_EXPANSION_TEMPERATURE",
+                "rerank_candidates": "RERANK_CANDIDATES",
+                "search_k_max": "SEARCH_K_MAX",
+                "search_k_multiplier": "SEARCH_K_MULTIPLIER",
+                "image_search_topk": "IMAGE_SEARCH_TOPK",
+                "enable_vision_reranker": "ENABLE_VISION_RERANKER",
+                "vision_reranker_model": "VISION_RERANKER_MODEL",
+                "vision_rerank_weight": "VISION_RERANK_WEIGHT",
+                "vision_rerank_max_images": "VISION_RERANK_MAX_IMAGES",
             }
             for k, v in (data or {}).items():
                 if hasattr(cfg, k):

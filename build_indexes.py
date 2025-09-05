@@ -62,7 +62,7 @@ def ensure_schema(conn: sqlite3.Connection):
 
 def _chunk_meta(c) -> Dict[str, Any]:
     meta = {}
-    for key in ("section", "subsection", "figure_id", "table_id", "image_ids", "bbox"):
+    for key in ("section", "subsection", "figure_id", "table_id", "image_ids", "bbox", "diagram_label"):
         val = getattr(c, key, None)
         if val:
             meta[key] = val

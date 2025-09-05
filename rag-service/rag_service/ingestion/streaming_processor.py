@@ -53,9 +53,16 @@ class StreamingDocumentProcessor:
                     if page_text:
                         blocks = [{"bbox": [0, 0, 0, 0], "text": page_text}]
                 # Create chunks from blocks and associate nearest images (by bbox centroid distance)
-                for cid, chunk in enumerate(self._create_page_chunks(blocks, images, doc_id, page_num)):
+                page_chunks = self._create_page_chunks(blocks, images, doc_id, page_num)
+                for cid, chunk in enumerate(page_chunks):
                     chunk.chunk_id = f"{doc_id}_{page_num}_{cid}"
                     yield chunk
+                # Region-aware diagram label chunks near each image
+                label_chunks = self._create_image_label_chunks(blocks, images, doc_id, page_num)
+                base = len(page_chunks)
+                for i, ch in enumerate(label_chunks):
+                    ch.chunk_id = f"{doc_id}_{page_num}_{base + i}"
+                    yield ch
                 # Cleanup
                 del blocks, images
                 gc.collect()
@@ -173,6 +180,72 @@ class StreamingDocumentProcessor:
                 ch.image_ids.append(im["image_id"])
 
         return chunks
+
+    def _create_image_label_chunks(self, blocks: List[Dict[str, Any]], images: List[Dict[str, Any]], doc_id: str, page_num: int) -> List[Chunk]:
+        """Create small, focused chunks consisting of text labels located near each image bbox.
+
+        This helps retrieve short diagram annotations such as voltages and pin names.
+        """
+        import math
+        label_chunks: List[Chunk] = []
+        if not images or not blocks:
+            return label_chunks
+
+        def center(b: List[float]) -> Tuple[float, float]:
+            x0, y0, x1, y1 = b
+            return ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+
+        # Pre-calc cleaned text blocks
+        tb: List[Tuple[List[float], str]] = []
+        for b in blocks:
+            txt = (b.get("text") or "").strip()
+            bb = b.get("bbox")
+            if not txt or not bb:
+                continue
+            tb.append((bb, txt))
+
+        for im in images:
+            ib = im.get("bbox")
+            if not ib:
+                continue
+            ix0, iy0, ix1, iy1 = [float(v) for v in ib]
+            # Expand bbox by 35% + 20px margin to capture nearby labels
+            pad_x = (ix1 - ix0) * 0.35 + 20
+            pad_y = (iy1 - iy0) * 0.35 + 20
+            rx0, ry0, rx1, ry1 = ix0 - pad_x, iy0 - pad_y, ix1 + pad_x, iy1 + pad_y
+
+            ic = center(ib)
+            selected: List[Tuple[float, List[float], str]] = []
+            for bb, txt in tb:
+                cx, cy = center(bb)
+                if (rx0 <= cx <= rx1) and (ry0 <= cy <= ry1):
+                    # Distance from image center, prioritize nearer labels
+                    d = (cx - ic[0]) ** 2 + (cy - ic[1]) ** 2
+                    # Filter out very long paragraphs; keep concise labels
+                    if 2 <= len(txt) <= 200:
+                        selected.append((d, bb, txt))
+
+            if not selected:
+                continue
+            selected.sort(key=lambda x: x[0])
+            # Concatenate top-N labels; prefer 3-6 small lines
+            lines = [t for _, _, t in selected[:6]]
+            text = " \n".join(lines).strip()
+            if not text:
+                continue
+            bbox_union = self._union_bbox([bb for _, bb, _ in selected]) if selected else ib
+            ch = Chunk(
+                doc_id=doc_id,
+                chunk_id="",
+                page=page_num,
+                text=text,
+                image_paths=[im.get("path")],
+                image_ids=[im.get("image_id")],
+                bbox=bbox_union,
+            )
+            label_chunks.append(ch)
+
+        return label_chunks
 
     def _union_bbox(self, boxes: List[List[float]]) -> List[float]:
         xs0 = [b[0] for b in boxes if b]

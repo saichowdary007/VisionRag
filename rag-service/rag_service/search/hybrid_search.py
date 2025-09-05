@@ -36,6 +36,9 @@ class HybridSearcher:
     cache_ttl_seconds: int = 3600
     binary_first: bool = False
     binary_candidates: int = 1000
+    rerank_candidates: int = 50
+    search_k_max: int = 100
+    search_k_multiplier: int = 3
 
     def search(self, query: str, top_k: int = 20) -> List[SearchResult]:
         # Cache check
@@ -47,7 +50,7 @@ class HybridSearcher:
         # Stage 1: Vector + lexical (optimized for speed)
         qvec = self.text_embedder.embed([query]).astype(np.float32)
         # Optimized candidate counts for faster search while maintaining quality
-        search_k = min(100, top_k * 3)  # Adaptive candidate count based on requested top_k
+        search_k = min(self.search_k_max, top_k * self.search_k_multiplier)  # Adaptive candidate count
 
         # Optional: binary-first filtering to narrow candidates
         candidate_cids: set[str] | None = None
@@ -84,8 +87,8 @@ class HybridSearcher:
         if candidate_cids is not None:
             lexical_rank = [(cid, s) for cid, s in lexical_rank if cid in candidate_cids]
 
-        # Optimized fusion with reduced candidate pool for faster reranking
-        fusion_candidates = min(25, top_k * 2)  # Fewer candidates for fusion
+        # Candidate pool size for reranker
+        fusion_candidates = max(1, int(self.rerank_candidates))
         fused = reciprocal_rank_fusion([vector_rank, lexical_rank, binary_rank])[:fusion_candidates]
 
         # Stage 2: Rerank (optimized)

@@ -23,14 +23,22 @@ services:
       - USE_BINARY_FILTER=true
       - BINARY_FILTER_CANDIDATES=1000
       - INVALIDATE_ON_REINDEX=true
-      # LM Studio integration (optimized for bridge networking)
+      # LM Studio integration
       - GENERATOR=lm_studio
+      # When running LM Studio on the HOST, containers must use host.docker.internal (macOS/Windows). For Linux, see README note.
       - LM_STUDIO_URL=http://host.docker.internal:1234/v1/chat/completions
       - LM_STUDIO_MODEL=google/gemma-3-12b
       - LM_STUDIO_TEMPERATURE=0.1
       - LM_STUDIO_MAX_TOKENS=1024
       - LM_STUDIO_TIMEOUT=120
       - LM_STUDIO_MAX_RETRIES=3
+      # Query Fusion (RAG-Fusion)
+      - ENABLE_QUERY_FUSION=true
+      - QUERY_EXPANSIONS=3
+      # Retrieval tuning
+      - RERANK_CANDIDATES=50
+      - SEARCH_K_MAX=100
+      - SEARCH_K_MULTIPLIER=3
       # Redis cache (optional)
       - REDIS_URL=redis://redis:6379/0
       - CACHE_TTL_SECONDS=3600
