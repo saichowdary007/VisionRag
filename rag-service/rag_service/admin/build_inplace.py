@@ -10,7 +10,7 @@ import faiss
 
 from ..config import get_config
 from ..ingestion.streaming_processor import StreamingDocumentProcessor
-from ..embeddings.text_embedder import M1OptimizedTextEmbedder
+from ..embeddings.text_embedder import OptimizedTextEmbedder
 from ..search.binary_vector_store import float_to_binary
 
 
@@ -109,7 +109,7 @@ def main() -> int:
     ensure_schema(conn)
 
     processor = StreamingDocumentProcessor(max_memory_mb=4000)
-    embedder = M1OptimizedTextEmbedder(cfg.text_embedding_model, device=cfg.device, batch_size=16)
+    embedder = OptimizedTextEmbedder(cfg.text_embedding_model, device=cfg.device, batch_size=16)
 
     pdfs = sorted(list(docs_dir.glob("**/*.pdf")))
     if not pdfs:

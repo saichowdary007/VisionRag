@@ -13,12 +13,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from rag_service.config import get_config
-from rag_service.embeddings.text_embedder import M1OptimizedTextEmbedder
+from rag_service.embeddings.text_embedder import OptimizedTextEmbedder
 from rag_service.search.vector_store import VectorStore
 from rag_service.search.lexical_store import LexicalStore
 from rag_service.search.hybrid_search import HybridSearcher
 from rag_service.rerank.bge import BGEReranker
-from rag_service.monitoring.perf import M1PerformanceMonitor, QUERY_LATENCY
+from rag_service.monitoring.perf import PerformanceMonitor, QUERY_LATENCY
 from prometheus_client import Histogram
 from rag_service.admin.reindex import start_reindex, get_status
 from rapidfuzz import fuzz
@@ -41,8 +41,8 @@ class QueryRequest(BaseModel):
 
 
 cfg = get_config()
-app = FastAPI(title="M1-Optimized RAG Service", default_response_class=ORJSONResponse)
-monitor = M1PerformanceMonitor()
+app = FastAPI(title="Vision RAG Service", default_response_class=ORJSONResponse)
+monitor = PerformanceMonitor()
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
@@ -56,7 +56,7 @@ app.add_middleware(
 )
 
 
-_text_embedder: Optional[M1OptimizedTextEmbedder] = None
+_text_embedder: Optional[OptimizedTextEmbedder] = None
 _vector_store = VectorStore(cfg.faiss_index_path)
 _lexical_store = LexicalStore(cfg.db_path)
 _reranker: Optional[BGEReranker] = None
@@ -69,7 +69,7 @@ def get_searcher(rerank: bool) -> HybridSearcher:
     global _text_embedder
     global _binary_store
     if _text_embedder is None:
-        _text_embedder = M1OptimizedTextEmbedder(cfg.text_embedding_model, device=cfg.device)
+        _text_embedder = OptimizedTextEmbedder(cfg.text_embedding_model, device=cfg.device)
     if rerank and _reranker is None:
         _reranker = BGEReranker(cfg.reranker_model, device=cfg.device)
     if _binary_store is None and Path(cfg.faiss_binary_index_path).exists():

@@ -5,7 +5,7 @@ from typing import List, Tuple, Optional
 
 import numpy as np
 
-from ..embeddings.text_embedder import M1OptimizedTextEmbedder
+from ..embeddings.text_embedder import OptimizedTextEmbedder
 from ..search.vector_store import VectorStore
 from ..search.binary_vector_store import BinaryVectorStore
 from ..search.lexical_store import LexicalStore
@@ -27,7 +27,7 @@ def reciprocal_rank_fusion(rankings: List[List[Tuple[str, float]]], k: int = 60)
 
 @dataclass
 class HybridSearcher:
-    text_embedder: M1OptimizedTextEmbedder
+    text_embedder: OptimizedTextEmbedder
     vector_store: VectorStore
     lexical_store: LexicalStore
     reranker: object | None = None

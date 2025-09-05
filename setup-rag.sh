@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-echo "Setting up M1-Optimized RAG System..."
+echo "Setting up Vision RAG System..."
 
 if [[ $(uname -m) != "arm64" ]]; then
   echo "Warning: This setup is optimized for Apple Silicon (arm64)."
@@ -20,7 +20,7 @@ $PY -m venv venv
 source venv/bin/activate
 
 pip install --upgrade pip wheel setuptools
-pip install -r requirements-m1.txt
+pip install -r requirements.txt
 
 echo "Creating folders..."
 mkdir -p rag-service/documents config rag-service/rag_service/__pycache__
@@ -43,6 +43,6 @@ fi
 echo "You can now add PDFs to rag-service/documents and build indexes:"
 echo "  source venv/bin/activate && python build_indexes.py --memory-limit 12GB"
 echo "Then start services:"
-echo "  docker-compose -f docker-compose-m1.yml up -d"
+echo "  docker compose up -d"
 echo "API: http://localhost:8001  |  Prometheus: http://localhost:9090"
 

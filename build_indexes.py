@@ -18,7 +18,7 @@ sys.path.append(str(ROOT / "rag-service"))
 
 from rag_service.config import get_config
 from rag_service.ingestion.streaming_processor import StreamingDocumentProcessor
-from rag_service.embeddings.text_embedder import M1OptimizedTextEmbedder
+from rag_service.embeddings.text_embedder import OptimizedTextEmbedder
 from rag_service.search.binary_vector_store import float_to_binary
 
 
@@ -124,7 +124,7 @@ def main():
     ensure_schema(conn)
 
     processor = StreamingDocumentProcessor(max_memory_mb=4000)
-    embedder = M1OptimizedTextEmbedder(cfg.text_embedding_model, device=cfg.device, batch_size=16)
+    embedder = OptimizedTextEmbedder(cfg.text_embedding_model, device=cfg.device, batch_size=16)
 
     all_texts: List[str] = []
     all_rowids: List[int] = []

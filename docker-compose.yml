@@ -2,7 +2,7 @@ services:
   rag-service:
     build:
       context: ./rag-service
-      dockerfile: Dockerfile.m1
+      dockerfile: Dockerfile
     ports:
       - "8001:8001"
     # Use bridge network with optimizations for macOS compatibility
