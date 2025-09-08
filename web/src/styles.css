@@ -1,0 +1,90 @@
+:root{
+  --bg:#0b0f14; /* dark slate */
+  --panel:#0f1720;
+  --muted:#a7b3c2;
+  --text:#e6edf3;
+  --accent:#22c55e;
+  --bubble-user:#1f2937;
+  --bubble-assistant:#111827;
+  --border:#233042;
+  --code-bg:#0b1118;
+  --code-border:#1f2a37;
+  --radius:14px;
+  --space:12px;
+}
+*{box-sizing:border-box}
+html,body,#root{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+a{color:var(--accent)}
+
+.layout{display:grid;grid-template-columns:280px 1fr;height:100%}
+.sidebar{border-right:1px solid var(--border);background:var(--panel);padding:16px;display:flex;flex-direction:column;gap:12px}
+.brand{font-weight:600;font-size:14px;color:#cbd5e1;letter-spacing:.3px}
+.ingest input[type="text"], .ingest input[type="file"]{width:100%}
+.input, .button{border:1px solid var(--border);background:#0d141c;color:var(--text)}
+.button{padding:8px 12px;border-radius:10px;cursor:pointer}
+.button.primary{background:var(--accent);border-color:var(--accent);color:#06210f}
+.button:disabled{opacity:.6;cursor:not-allowed}
+
+.main{display:flex;flex-direction:column;height:100%}
+.header{height:48px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--border);background:var(--panel);position:sticky;top:0;z-index:1}
+.title{font-weight:600}
+
+.chat{flex:1;overflow:auto;padding:24px}
+.row{display:flex;gap:12px;margin:12px 0}
+.avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:#0e1620;font-size:12px;color:#9fb2c6}
+.bubble{max-width:800px;border:1px solid var(--border);padding:12px 14px;border-radius:var(--radius);position:relative}
+.user .bubble{background:var(--bubble-user)}
+.assistant .bubble{background:var(--bubble-assistant)}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.thumbs img{width:96px;border-radius:8px;border:1px solid var(--border);background:#0b1118}
+
+.composer{position:sticky;bottom:0;background:linear-gradient(180deg, rgba(11,15,20,0), var(--bg) 24px);padding:16px}
+.composer-inner{display:flex;gap:8px;align-items:flex-end;border:1px solid var(--border);border-radius:14px;background:#0d141c;padding:8px}
+.composer textarea{flex:1;resize:none;max-height:160px;min-height:44px;background:transparent;border:0;outline:none;color:var(--text);padding:8px}
+.kbd{border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;padding:2px 6px;color:#90a4b8;background:#0a1118}
+
+.images-meta{font-size:12px;color:var(--muted);margin-bottom:8px}
+.muted{color:var(--muted)}
+.sep{height:1px;background:var(--border);margin:8px 0}
+
+/* Copy button on assistant messages */
+.copy-btn{position:absolute;top:8px;right:8px;font-size:12px;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:#0b121a;color:var(--muted);cursor:pointer}
+.copy-btn:hover{color:var(--text)}
+
+/* Code blocks */
+pre{background:var(--code-bg)!important;border:1px solid var(--code-border)!important;border-radius:10px;padding:12px;overflow:auto}
+code{font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+
+/* Light theme overrides */
+.light{
+  --bg:#f8fafc;
+  --panel:#ffffff;
+  --muted:#64748b;
+  --text:#0f172a;
+  --accent:#16a34a;
+  --bubble-user:#f1f5f9;
+  --bubble-assistant:#ffffff;
+  --border:#e2e8f0;
+  --code-bg:#f8fafc;
+  --code-border:#e2e8f0;
+}
+
+/* Compact density */
+.compact{
+  --space:6px;
+  --radius:10px;
+}
+.compact .row{margin:8px 0}
+.compact .bubble{padding:8px 10px}
+.compact .composer textarea{min-height:38px}
+
+/* Ingest drop zone */
+.dropzone{border:1px dashed var(--border);border-radius:12px;padding:12px;text-align:center;color:var(--muted)}
+.progress{height:8px;background:#0b121a;border:1px solid var(--border);border-radius:999px;overflow:hidden}
+.progress > span{display:block;height:100%;background:var(--accent);width:0;transition: width .2s ease}
+
+@media (max-width: 960px){
+  .layout{grid-template-columns:1fr}
+  .sidebar{display:none}
+}

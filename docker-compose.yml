@@ -1,93 +1,56 @@
 services:
-  rag-service:
-    build:
-      context: ./rag-service
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-    # Use bridge network with optimizations for macOS compatibility
+  # vlm:
+  #   image: lmstudio/desktop:latest
+  #   command: ["--headless", "--port", "1234"]
+  #   ports: ["1234:1234"]
+  #   volumes:
+  #     - models:/models
+  #   environment:
+  #     - LMSTUDIO_DOWNLOAD_PATH=/models
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:1234/v1/models"]
+  #     interval: 10s
+  #     retries: 10
+
+  retriever:
+    build: .
+    ports: ["8081:8081"]
+    volumes:
+      - data:/data
     environment:
-      - DEVICE=mps
-      - MAX_MEMORY_GB=8
-      - MODEL_CACHE_DIR=/models
-      - DB_PATH=/app/data/documents.db
-      - FAISS_INDEX_PATH=/app/data/vectors.faiss
-      - FAISS_BINARY_INDEX_PATH=/app/data/vectors.bin
-      - FAISS_BINARY_IDS_PATH=/app/data/vectors.bin.ids.npy
-      - FAISS_IMAGE_INDEX_PATH=/app/data/vision.faiss
-      - DOCS_DIR=/app/documents
-      - PROMETHEUS_PORT=9108
-      # Vision + retrieval
-      - ENABLE_VISION=true
-      - ENABLE_CROSS_MODAL=true
-      - USE_BINARY_FILTER=true
-      - BINARY_FILTER_CANDIDATES=1000
-      - INVALIDATE_ON_REINDEX=true
-      # LM Studio integration
-      - GENERATOR=lm_studio
-      # When running LM Studio on the HOST, containers must use host.docker.internal (macOS/Windows). For Linux, see README note.
-      - LM_STUDIO_URL=http://host.docker.internal:1234/v1/chat/completions
-      - LM_STUDIO_MODEL=google/gemma-3-12b
-      - LM_STUDIO_TEMPERATURE=0.1
-      - LM_STUDIO_MAX_TOKENS=1024
-      - LM_STUDIO_TIMEOUT=120
-      - LM_STUDIO_MAX_RETRIES=3
-      # Query Fusion (RAG-Fusion)
-      - ENABLE_QUERY_FUSION=true
-      - QUERY_EXPANSIONS=3
-      # Retrieval tuning
-      - RERANK_CANDIDATES=50
-      - SEARCH_K_MAX=100
-      - SEARCH_K_MULTIPLIER=3
-      # Redis cache (optional)
-      - REDIS_URL=redis://redis:6379/0
-      - CACHE_TTL_SECONDS=3600
-    volumes:
-      - model_cache:/models
-      - ./config:/app/config
-      - ./rag-service/documents:/app/documents
-      - rag_data:/app/data
-    deploy:
-      resources:
-        limits:
-          memory: 10G
-          cpus: '6.0'
+      - SERVICE=retriever
+      # Prefer DATA_DIR; keep BYALDI_DATA for backwards-compat inside app
+      - DATA_DIR=/data
+      - BYALDI_DATA=/data
+      # Force lightweight fallback index unless you want full ColPali
+      - BYALDI_USE_FALLBACK=1
 
-  redis:
-    image: redis:7-alpine
-    profiles: [cache]
-    ports:
-      - "6379:6379"
-    command: ["redis-server", "--maxmemory", "2048mb", "--maxmemory-policy", "allkeys-lru"]
-
-  nginx:
-    image: nginx:alpine
-    profiles: [edge]
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  api:
+    build: .
+    ports: ["8080:8080"]
     depends_on:
-      - rag-service
-
-  prometheus:
-    image: prom/prometheus:latest
-    profiles: [metrics]
-    ports:
-      - "9090:9090"
+      - retriever
+      # - vlm
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.retention.time=7d'
-    deploy:
-      resources:
-        limits:
-          memory: 500M
-          cpus: '0.5'
+      - data:/data
+    environment:
+      - SERVICE=api
+      - DATA_DIR=/data
+      - RETRIEVER_BASE_URL=http://retriever:8081
+      # - LMSTUDIO_BASE_URL=http://vlm:1234
+      # - LMSTUDIO_MODEL=google/gemma-3-12b-it
+      - API_INTERNAL_BASE=http://api:8080
+      - API_PUBLIC_BASE=http://localhost:8080
+      - WEB_ORIGIN=http://localhost:5173
+
+  web:
+    build: ./web
+    ports: ["5173:80"]
+    environment:
+      # The app defaults to http://localhost:8080 if unset.
+      # This env var is only used at build time by Vite.
+      - VITE_API_BASE=http://localhost:8080
 
 volumes:
-  model_cache:
-  rag_data:
-  prometheus_data:
+  data: {}
+  models: {}
