@@ -52,4 +52,3 @@ Notes
 Development
 - Run only the API locally: `make dev` then open `http://localhost:8080/docs`.
 - Run the web locally: `cd web && npm install && npm run dev`.
-
