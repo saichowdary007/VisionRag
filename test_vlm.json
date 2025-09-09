@@ -1,0 +1,26 @@
+{
+  "model": "google/gemma-3-12b-it",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant that analyzes images."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "What do you see in this image? Please describe it briefly."
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+          }
+        }
+      ]
+    }
+  ],
+  "temperature": 0.2,
+  "max_tokens": 100
+}

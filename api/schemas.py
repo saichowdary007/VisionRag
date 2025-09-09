@@ -14,8 +14,11 @@ class AskBody(BaseModel):
     k: int = 5
     m: int = 3
     doc_id: Optional[str] = None
+    # Future flags (unused for now, kept for compatibility with clients)
+    rerank: Optional[bool] = None
 class RetrieverHit(BaseModel):
     image_path: str
     score: float
 class SearchResponse(BaseModel):
     hits: List[RetrieverHit]
+

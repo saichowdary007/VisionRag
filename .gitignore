@@ -57,3 +57,7 @@ data/
 
 # Docker
 .dockerignore
+
+# Web build artefacts
+web/node_modules/
+web/dist/

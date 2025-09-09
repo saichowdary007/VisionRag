@@ -54,3 +54,4 @@ def render_pdf_to_images(
             txt = ""
         texts.append(txt)
     return doc_id, images, texts
+

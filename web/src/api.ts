@@ -47,8 +47,16 @@ export async function askStream(
   return { text, images };
 }
 
+export type SourceItem = {
+  doc_id?: string;
+  page?: number;
+  score?: number;
+  image_url: string;
+  heatmap_url?: string | null;
+};
+
 export type AskStreamEvent =
-  | { type: "meta"; images: string[] }
+  | { type: "meta"; images: string[]; sources?: SourceItem[] }
   | { type: "delta"; text: string };
 
 export async function* askStreamGen(
@@ -75,8 +83,12 @@ export async function* askStreamGen(
       if (nl !== -1) {
         try {
           const meta = JSON.parse(chunk.slice(0, nl));
-          if (meta?.type === "images" && Array.isArray(meta.images)) {
-            yield { type: "meta", images: meta.images };
+          if (
+            (meta?.type === "images" || meta?.type === "meta") &&
+            Array.isArray(meta.images)
+          ) {
+            const sources = Array.isArray(meta.sources) ? meta.sources : undefined;
+            yield { type: "meta", images: meta.images, sources };
             const rest = chunk.slice(nl + 1);
             if (rest) {
               yield { type: "delta", text: rest };

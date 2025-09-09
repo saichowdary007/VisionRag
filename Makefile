@@ -1,7 +1,7 @@
 PYTHON := python3
 PIP := pip
 
-.PHONY: up down logs ps test lint dev ingest ask
+.PHONY: up down logs ps test lint dev ingest ask bootstrap
 
 # Use the root docker-compose file
 COMPOSE := docker compose -f docker-compose.yml
@@ -35,3 +35,6 @@ ingest:
 ask:
 	@if [ -z "$(Q)" ]; then echo "Usage: make ask Q=\"Your question\""; exit 1; fi; \
 	curl -N -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"question":"'"$(Q)"'"}'
+
+bootstrap:
+	bash scripts/dev_bootstrap.sh

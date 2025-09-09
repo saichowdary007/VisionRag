@@ -7,10 +7,11 @@ def test_retriever_index_and_search_fallback():
     # Use a temporary data dir and ensure it's picked up at import time
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["DATA_DIR"] = tmp
+        os.environ["RETRIEVER_INDEX_DIR"] = os.path.join(tmp, "index")
         os.environ["BYALDI_USE_FALLBACK"] = "1"
         # Import after setting env so server binds to the tmp dir
         import importlib
-        server = importlib.import_module("server")
+        server = importlib.import_module("retriever.server")
 
         client = TestClient(server.app)
 

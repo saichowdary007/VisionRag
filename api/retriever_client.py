@@ -22,3 +22,4 @@ def search(query: str, k: int = 5, doc_id: Optional[str] = None) -> List[Dict[st
     resp.raise_for_status()
     data = resp.json() or {}
     return data.get("hits", [])
+

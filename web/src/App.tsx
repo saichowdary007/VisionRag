@@ -4,13 +4,34 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus as themeDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { vs as themeLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { askStreamGen, ingestFromUrl, API_BASE } from "./api";
+import {
+  Send,
+  Upload,
+  FileText,
+  Sun,
+  Moon,
+  Palette,
+  Trash2,
+  Copy,
+  Download,
+  Link,
+  Bot,
+  User,
+  Zap,
+  Cpu,
+  Search,
+  Sparkles,
+  Menu,
+  X
+} from "lucide-react";
+import { askStreamGen, ingestFromUrl, API_BASE, type SourceItem } from "./api";
 
 type Msg = {
   id: string;
   role: "user" | "assistant";
   text: string;
   imgs?: string[];
+  sources?: SourceItem[];
 };
 
 function useAutoScroll(dep: any) {
@@ -29,6 +50,7 @@ export default function App() {
   const [ingestPct, setIngestPct] = useState(0);
   const [theme, setTheme] = useState<"dark" | "light">(() => (localStorage.getItem("vrag_theme") as any) || "dark");
   const [compact, setCompact] = useState<boolean>(() => localStorage.getItem("vrag_compact") === "1");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const chatRef = useAutoScroll(msgs);
 
   // Load persisted messages once
@@ -66,7 +88,7 @@ export default function App() {
     try {
       for await (const evt of askStreamGen(prompt)) {
         if (evt.type === "meta") {
-          setMsgs((m) => m.map((x) => (x.id === id ? { ...x, imgs: evt.images } : x)));
+          setMsgs((m) => m.map((x) => (x.id === id ? { ...x, imgs: evt.images, sources: evt.sources } : x)));
         } else if (evt.type === "delta") {
           setMsgs((m) => m.map((x) => (x.id === id ? { ...x, text: x.text + evt.text } : x)));
         }
@@ -136,22 +158,47 @@ export default function App() {
   }
 
   return (
-    <div className="layout">
+    <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      {/* Mobile sidebar toggle */}
+      <button
+        className="sidebar-toggle"
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+      >
+        {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+      </button>
+
+      {/* Mobile sidebar overlay */}
+      <div
+        className="sidebar-overlay"
+        onClick={() => setSidebarOpen(false)}
+      />
+
       <aside className="sidebar">
-        <div className="brand">Vision‑RAG</div>
+        <div className="brand">
+          <Sparkles size={24} />
+          <span>Vision‑RAG</span>
+        </div>
         <div className="sep" />
         <div className="ingest">
-          <div className="muted" style={{ marginBottom: 8 }}>Ingest PDF</div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <div className="ingest-header">
+            <FileText size={16} />
+            <span className="muted">Document Upload</span>
+          </div>
+
+          <div className="url-input-group">
             <input
               className="input"
-              placeholder="PDF URL"
+              placeholder="Enter PDF URL..."
               value={pdfUrl}
               onChange={(e) => setPdfUrl(e.target.value)}
-              style={{ flex: 1, padding: 10, borderRadius: 10 }}
             />
-            <button className="button" onClick={onIngestUrl} disabled={busy}>Ingest</button>
+            <button className="button primary" onClick={onIngestUrl} disabled={busy}>
+              <Link size={16} />
+              <span>Ingest</span>
+            </button>
           </div>
+
           <div
             className="dropzone"
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
@@ -161,50 +208,109 @@ export default function App() {
               if (file) await uploadFile(file);
             }}
           >
-            Drag & drop PDF here
+            <Upload size={24} />
+            <div>Drag & drop PDF files here</div>
+            <div className="muted">or click to browse</div>
           </div>
-          <div style={{ height: 8 }} />
-          {busy ? (
-            <div className="progress"><span style={{ width: `${Math.max(ingestPct, 10)}%` }} /></div>
-          ) : null}
-          <div style={{ height: 8 }} />
-          <input className="input" type="file" accept="application/pdf" onChange={onIngestFile} />
+
+          {busy && (
+            <div className="upload-progress">
+              <div className="progress">
+                <span style={{ width: `${Math.max(ingestPct, 10)}%` }} />
+              </div>
+              <span className="muted">Processing... {ingestPct}%</span>
+            </div>
+          )}
+
+          <div className="file-input-wrapper">
+            <input
+              id="file-input"
+              className="file-input"
+              type="file"
+              accept="application/pdf"
+              onChange={onIngestFile}
+            />
+            <label htmlFor="file-input" className="file-input-label">
+              <Upload size={16} />
+              <span>Choose PDF file</span>
+            </label>
+          </div>
         </div>
       </aside>
 
       <main className="main">
         <div className="header">
-          <div className="title">Chat</div>
-          <div className="muted" style={{ marginLeft: 8 }}>ColPali → Gemma‑3</div>
+          <div className="title">
+            <Bot size={20} />
+            <span>Chat</span>
+          </div>
+          <div className="muted" style={{ marginLeft: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Cpu size={14} />
+            <span>ColPali → Gemma‑3</span>
+          </div>
           <div style={{ flex: 1 }} />
-          <button className="button" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}>{theme === "dark" ? "Light" : "Dark"}</button>
-          <button className="button" onClick={() => setCompact(c => !c)}>{compact ? "Comfortable" : "Compact"}</button>
-          <button className="button" onClick={() => setMsgs([])}>Clear</button>
-          <span className="kbd">Enter</span>
-          <span className="muted">to send</span>
-          <span className="kbd">Shift</span>+
-          <span className="kbd">Enter</span>
-          <span className="muted">for newline</span>
+          <div className="header-controls">
+            <button className="button" onClick={() => setTheme(t => t === "dark" ? "light" : "dark")} title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}>
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+            <button className="button" onClick={() => setCompact(c => !c)} title={compact ? "Switch to comfortable view" : "Switch to compact view"}>
+              <Palette size={16} />
+            </button>
+            {/* Heatmap toggle removed since context images are hidden */}
+            {/* <button className="button" onClick={() => setShowHeatmaps(h => !h)} title={showHeatmaps ? "Hide heatmaps" : "Show heatmaps"}>
+              {showHeatmaps ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button> */}
+            <button className="button" onClick={() => setMsgs([])} title="Clear conversation">
+              <Trash2 size={16} />
+            </button>
+          </div>
+          <div className="keyboard-hints">
+            <span className="kbd">Enter</span>
+            <span className="muted">to send</span>
+            <span className="kbd">Shift</span>+
+            <span className="kbd">Enter</span>
+            <span className="muted">for newline</span>
+          </div>
         </div>
 
         <div className="chat" ref={chatRef}>
           {msgs.map((m) => (
             <div key={m.id} className={`row ${m.role}`}>
-              <div className="avatar">{m.role === "user" ? "U" : "A"}</div>
+              <div className="avatar">
+                {m.role === "user" ? <User size={16} /> : <Bot size={16} />}
+              </div>
               <div className="bubble">
                 {m.role === "assistant" ? (
-                  <button className="copy-btn" title="Copy answer" onClick={() => navigator.clipboard.writeText(m.text)}>Copy</button>
+                  <button className="copy-btn" title="Copy answer" onClick={() => navigator.clipboard.writeText(m.text)}>
+                    <Copy size={12} />
+                  </button>
                 ) : null}
-                {m.imgs?.length ? (
+                {/* Context pages/images are now hidden */}
+                {/*
+                {m.sources?.length ? (
+                  <div className="images-meta">Context pages</div>
+                ) : m.imgs?.length ? (
                   <div className="images-meta">Context pages</div>
                 ) : null}
-                {m.imgs?.length ? (
+                {m.sources?.length ? (
+                  <div className="thumbs">
+                    {m.sources.map((s, i) => (
+                      <div key={i} className="thumb">
+                        <img className="page" src={s.image_url} alt="page" />
+                        {showHeatmaps && s.heatmap_url ? (
+                          <img className="heatmap" src={s.heatmap_url} alt="heatmap" />
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : m.imgs?.length ? (
                   <div className="thumbs">
                     {m.imgs.map((u, i) => (
                       <img key={i} src={u} alt="page" />
                     ))}
                   </div>
                 ) : null}
+                */}
                 <div>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -242,14 +348,22 @@ export default function App() {
         <div className="composer">
           <div className="composer-inner">
             <textarea
-              placeholder="Ask a question…"
+              placeholder="Ask about your documents..."
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={onKeyDown}
             />
             <button className="button primary" onClick={onAsk} disabled={busy || !q.trim()}>
-              Send
+              <Send size={16} />
+              <span>Send</span>
             </button>
+          </div>
+          <div className="keyboard-hints">
+            <span className="kbd">Enter</span>
+            <span className="muted">to send</span>
+            <span className="kbd">Shift</span>+
+            <span className="kbd">Enter</span>
+            <span className="muted">for newline</span>
           </div>
         </div>
       </main>
