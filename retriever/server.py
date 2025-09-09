@@ -30,6 +30,8 @@ RERANK_ENABLED = os.getenv("RERANK_ENABLED", "0") == "1"
 RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 RERANK_DEVICE = os.getenv("RERANK_DEVICE", RETRIEVER_DEVICE)
 RERANK_WEIGHT = float(os.getenv("RERANK_WEIGHT", "0.2"))
+# Number of candidates to pass to reranker before final top-k
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "50"))
 
 # Heatmaps
 HEATMAPS_DIR = Path(os.getenv("HEATMAPS_DIR", str(DATA_DIR / "heatmaps")))
@@ -149,7 +151,7 @@ def search_documents(request: SearchRequest) -> SearchResponse:
         if RERANK_ENABLED and fused:
             # Gather candidate texts from BM25 store when possible (falls back to empty text)
             # Use a moderate candidate pool size to control latency
-            prelim = sorted(fused.items(), key=lambda x: x[1], reverse=True)[: max(10, request.k * 2)]
+            prelim = sorted(fused.items(), key=lambda x: x[1], reverse=True)[: max(10, min(RERANK_CANDIDATES, request.k * 5))]
             cand_ids = [pid for pid, _ in prelim]
             cand_texts = bm25.get_texts(cand_ids)
             # Ensure all ids exist in the dict

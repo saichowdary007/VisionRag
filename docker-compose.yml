@@ -17,9 +17,10 @@ services:
       - HYBRID_ALPHA=${HYBRID_ALPHA:-0.2}
       # Reranking configuration
       - RERANK_ENABLED=${RERANK_ENABLED:-1}
-      - RERANK_MODEL=${RERANK_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
-      - RERANK_DEVICE=${RERANK_DEVICE:-cuda}
+      - RERANK_MODEL=${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      - RERANK_DEVICE=${RERANK_DEVICE:-cpu}
       - RERANK_WEIGHT=${RERANK_WEIGHT:-0.2}
+      - RERANK_CANDIDATES=${RERANK_CANDIDATES:-50}
       # Async indexing
       - INDEX_ASYNC=${INDEX_ASYNC:-1}
 
