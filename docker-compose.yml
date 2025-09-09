@@ -15,6 +15,13 @@ services:
       # - BYALDI_USE_FALLBACK=1
       # Hybrid weight (0 disables BM25)
       - HYBRID_ALPHA=${HYBRID_ALPHA:-0.2}
+      # Reranking configuration
+      - RERANK_ENABLED=${RERANK_ENABLED:-1}
+      - RERANK_MODEL=${RERANK_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
+      - RERANK_DEVICE=${RERANK_DEVICE:-cuda}
+      - RERANK_WEIGHT=${RERANK_WEIGHT:-0.2}
+      # Async indexing
+      - INDEX_ASYNC=${INDEX_ASYNC:-1}
 
   api:
     build: .

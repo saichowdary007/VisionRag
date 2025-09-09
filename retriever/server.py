@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from .byaldi_wrapper import ByaldiRetriever
 from .bm25 import BM25Index
+from .rerank import Reranker
 from .heatmaps import generate_placeholder_heatmap
 
 
@@ -24,6 +25,12 @@ RETRIEVER_INDEX_DIR.mkdir(parents=True, exist_ok=True)
 # Hybrid
 HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0"))
 
+# Reranker settings
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "0") == "1"
+RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+RERANK_DEVICE = os.getenv("RERANK_DEVICE", RETRIEVER_DEVICE)
+RERANK_WEIGHT = float(os.getenv("RERANK_WEIGHT", "0.2"))
+
 # Heatmaps
 HEATMAPS_DIR = Path(os.getenv("HEATMAPS_DIR", str(DATA_DIR / "heatmaps")))
 HEATMAPS_DIR.mkdir(parents=True, exist_ok=True)
@@ -32,6 +39,7 @@ HEATMAPS_DIR.mkdir(parents=True, exist_ok=True)
 # Initialize retriever and BM25
 retriever = ByaldiRetriever(str(RETRIEVER_INDEX_DIR), model_name=RETRIEVER_MODEL, device=RETRIEVER_DEVICE)
 bm25 = BM25Index.open(RETRIEVER_INDEX_DIR)
+reranker = Reranker(model_name=RERANK_MODEL, device=RERANK_DEVICE, enabled=RERANK_ENABLED)
 
 app = FastAPI(title="Retriever Service", version="2.0.0")
 
@@ -54,6 +62,19 @@ class SearchResponse(BaseModel):
     total: int
 
 
+class EvalRequest(BaseModel):
+    query: str
+    relevant_page_ids: List[str]
+    k: int = 5
+    doc_id: Optional[str] = None
+
+
+class EvalResponse(BaseModel):
+    mrr: float
+    recall_at_k: float
+    ndcg: float
+
+
 @app.get("/healthz")
 def healthz():
     return {
@@ -63,23 +84,34 @@ def healthz():
         "device": RETRIEVER_DEVICE,
         "index_dir": str(RETRIEVER_INDEX_DIR),
         "hybrid_alpha": HYBRID_ALPHA,
+        "rerank_enabled": RERANK_ENABLED,
+        "rerank_model": RERANK_MODEL if RERANK_ENABLED else None,
     }
 
 
+def _do_index(doc_id: str, images: List[str], texts: Optional[List[str]]):
+    count = retriever.index_document(doc_id, images, texts)
+    if texts:
+        items = []
+        for i, _ in enumerate(images):
+            page_num = i + 1
+            page_id = f"{doc_id}:{page_num}"
+            txt = texts[i] if i < len(texts) else None
+            items.append((page_id, txt))
+        bm25.bulk_upsert(items)
+    return count
+
+
 @app.post("/index")
-def index_document(request: IndexRequest):
+def index_document(request: IndexRequest, background_tasks: BackgroundTasks):
     try:
-        count = retriever.index_document(request.doc_id, request.images, request.texts)
-        # Update BM25 texts
-        if request.texts:
-            items = []
-            for i, _ in enumerate(request.images):
-                page_num = i + 1
-                page_id = f"{request.doc_id}:{page_num}"
-                txt = request.texts[i] if i < len(request.texts) else None
-                items.append((page_id, txt))
-            bm25.bulk_upsert(items)
-        return {"status": "success", "doc_id": request.doc_id, "images_indexed": count}
+        # Optional async path controlled by env var
+        if os.getenv("INDEX_ASYNC", "0") == "1":
+            background_tasks.add_task(_do_index, request.doc_id, request.images, request.texts)
+            return {"status": "accepted", "doc_id": request.doc_id}
+        else:
+            count = _do_index(request.doc_id, request.images, request.texts)
+            return {"status": "success", "doc_id": request.doc_id, "images_indexed": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Indexing failed: {e}")
 
@@ -112,6 +144,24 @@ def search_documents(request: SearchRequest) -> SearchResponse:
         all_ids = set(dense_ids) | set(bm25_ids)
         for pid in all_ids:
             fused[pid] = (1 - alpha) * dense_rrf.get(pid, 0.0) + alpha * bm25_rrf.get(pid, 0.0)
+
+        # Optional CrossEncoder reranking (text-based) on the fused top set
+        if RERANK_ENABLED and fused:
+            # Gather candidate texts from BM25 store when possible (falls back to empty text)
+            # Use a moderate candidate pool size to control latency
+            prelim = sorted(fused.items(), key=lambda x: x[1], reverse=True)[: max(10, request.k * 2)]
+            cand_ids = [pid for pid, _ in prelim]
+            cand_texts = bm25.get_texts(cand_ids)
+            # Ensure all ids exist in the dict
+            for cid in cand_ids:
+                if cid not in cand_texts:
+                    cand_texts[cid] = ""
+            rerank_scores = reranker.rerank(request.query, cand_texts)
+            if rerank_scores:
+                # Linear blend between fused and rerank scores
+                w = RERANK_WEIGHT
+                for cid, rs in rerank_scores.items():
+                    fused[cid] = (1 - w) * fused.get(cid, 0.0) + w * float(rs)
 
         # Build hit map from dense metadata if available, else fallback to BM25 store via index dir
         hit_meta: Dict[str, Dict[str, Any]] = {}
@@ -175,4 +225,40 @@ def search_documents(request: SearchRequest) -> SearchResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {e}")
 
+
+def _dcg(rels: List[int]) -> float:
+    import math
+    return sum((rel / math.log2(i + 2)) for i, rel in enumerate(rels))
+
+
+@app.post("/eval")
+def evaluate(request: EvalRequest) -> EvalResponse:
+    """Compute simple offline metrics for a single query.
+
+    - MRR: reciprocal rank of the first relevant
+    - Recall@K: fraction of relevant items present in top-K
+    - NDCG: using binary relevance
+    """
+    try:
+        resp = search_documents(SearchRequest(query=request.query, k=request.k, doc_id=request.doc_id))
+        preds = [h["page_id"] for h in resp.hits]
+        gold = set(request.relevant_page_ids)
+        # MRR
+        rr = 0.0
+        for i, pid in enumerate(preds):
+            if pid in gold:
+                rr = 1.0 / float(i + 1)
+                break
+        # Recall@K
+        hit_count = sum(1 for pid in preds if pid in gold)
+        recall = (hit_count / float(len(gold))) if gold else 0.0
+        # NDCG
+        rels = [1 if pid in gold else 0 for pid in preds]
+        dcg = _dcg(rels)
+        ideal_rels = sorted(rels, reverse=True)
+        idcg = _dcg(ideal_rels) if ideal_rels else 0.0
+        ndcg = (dcg / idcg) if idcg > 0 else 0.0
+        return EvalResponse(mrr=float(rr), recall_at_k=float(recall), ndcg=float(ndcg))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Eval failed: {e}")
 

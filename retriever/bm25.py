@@ -131,3 +131,15 @@ class BM25Index:
             results.append((pid, float(score)))
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:k]
+
+    # Lightweight getters to expose stored texts for reranking or analytics
+    def get_text(self, page_id: str) -> str | None:
+        return self._texts.get(page_id)
+
+    def get_texts(self, page_ids: List[str]) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for pid in page_ids:
+            txt = self._texts.get(pid)
+            if txt is not None:
+                out[pid] = txt
+        return out

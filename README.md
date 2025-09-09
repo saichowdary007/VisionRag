@@ -52,6 +52,13 @@ Environment (.env)
 - Hybrid / ranking:
   - `TOP_K=5`
   - `HYBRID_ALPHA=0.2` (0 disables BM25)
+- Reranking (cross-encoder):
+  - `RERANK_ENABLED=1` (1 to enable, 0 to disable)
+  - `RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2` (default model)
+  - `RERANK_DEVICE=cuda` (use `cuda` for GPU, `cpu` for CPU)
+  - `RERANK_WEIGHT=0.2` (weight for blending rerank scores, 0-1)
+- Async indexing:
+  - `INDEX_ASYNC=1` (1 to enable async indexing, 0 for sync)
 
 Notes
 - First line of the `/ask` stream emits a JSON meta line with the images used by the VLM so the UI can show thumbnails.
@@ -68,6 +75,13 @@ RETRIEVER_BASE_URL=http://retriever:8081
 API_PUBLIC_BASE=http://localhost:8080
 API_INTERNAL_BASE=http://host.docker.internal:8080
 WEB_ORIGIN=http://localhost:5173
+
+# Reranking configuration
+RERANK_ENABLED=1
+RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+RERANK_DEVICE=cuda
+RERANK_WEIGHT=0.2
+INDEX_ASYNC=1
 
 VLM_BASE_URL=http://host.docker.internal:1234
 VLM_API_KEY=lm-studio
@@ -89,4 +103,5 @@ Health checks
 Search behavior
 - Dense retrieval with ColPali via Byaldi.
 - Optional hybrid fusion with BM25 over page texts (PyMuPDF/PDFium extraction).
+- Optional cross-encoder reranking for improved result quality (configurable via RERANK_* env vars).
 - `/ask` streams tokens and returns source thumbnails and heatmap overlays.
