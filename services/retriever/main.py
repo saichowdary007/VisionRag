@@ -10,11 +10,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
 
-# Guard against invalid MILVUS_URI leaking into environment which breaks pymilvus import
-if os.environ.get("MILVUS_URI"):
-    os.environ.pop("MILVUS_URI", None)
-# Provide a safe default so pymilvus settings validation passes during import
-os.environ.setdefault("MILVUS_URI", "http://localhost:19530")
+MILVUS_URI = os.getenv("MILVUS_URI", "http://localhost:19530")
 
 try:
     from transformers import AutoProcessor, AutoModel
@@ -155,8 +151,7 @@ def _ensure_milvus(dimension: int):
     if MilvusClient is None:
         raise RuntimeError("pymilvus not available in this environment")
     if _client is None:
-        # Use Milvus Lite by pointing MilvusClient to a local DB path.
-        _client = MilvusClient(uri=MILVUS_DB_PATH)
+        _client = MilvusClient(uri=MILVUS_URI)
         # Create collection if needed
         if not _client.has_collection(collection_name=COLLECTION_NAME):
             schema = _client.create_schema(auto_id=True, description="ColPali multi-vector store")
@@ -180,7 +175,7 @@ def healthz():
         "status": "ok",
         "model": MODEL_ID,
         "device": DEVICE,
-        "milvus": MILVUS_DB_PATH,
+        "milvus": MILVUS_URI,
         "collection": COLLECTION_NAME,
     }
 
