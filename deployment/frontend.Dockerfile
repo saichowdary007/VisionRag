@@ -1,4 +1,4 @@
-FROM node:18-alpine AS base
+FROM node:22-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
@@ -37,7 +37,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-COPY --from=builder /app/public ./public
+# Ensure a public assets directory exists and include the pdf.js worker
+RUN mkdir -p ./public
+# so the app can load it at runtime without bundling issues.
+COPY --from=builder /app/node_modules/pdfjs-dist/build/pdf.worker.min.mjs ./public/pdf.worker.min.mjs
 
 # Set the correct permission for prerender cache
 RUN mkdir .next

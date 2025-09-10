@@ -1,9 +1,10 @@
+'use client';
+
 import React from 'react';
 import { MessageSquare, Sun, Moon, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useTheme } from '@/hooks/useTheme';
 import { useIngest } from '@/hooks/useIngest';
-import React from 'react';
 
 interface ChatHeaderProps {
   onClearMessages: () => void;

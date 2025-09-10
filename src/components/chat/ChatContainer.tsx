@@ -1,9 +1,12 @@
+'use client';
+
 import React, { useEffect, useRef } from 'react';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { ChatHeader } from './ChatHeader';
 import { useChat } from '@/hooks/useChat';
 import { cn } from '@/lib/utils';
+import { MessageSquare } from 'lucide-react';
 
 export function ChatContainer() {
   const { messages, isLoading, error, sendMessage, clearMessages } = useChat();
@@ -89,6 +92,3 @@ export function ChatContainer() {
     </div>
   );
 }
-
-// Import MessageSquare for the empty state
-import { MessageSquare } from 'lucide-react';

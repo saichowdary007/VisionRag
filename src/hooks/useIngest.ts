@@ -2,10 +2,17 @@
 
 import { useCallback, useState } from 'react';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs';
+// Derive installed pdfjs-dist version to keep worker in sync
+// JSON import requires resolveJsonModule: true (already set)
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - package.json import typing
+import pdfjsPkg from 'pdfjs-dist/package.json';
 
-// Configure worker for pdfjs in browser
-GlobalWorkerOptions.workerSrc = (pdfjsWorker as unknown as { default: string }).default || (pdfjsWorker as unknown as string);
+// Configure worker for pdfjs in browser.
+// Always match the worker version to the installed pdfjs-dist to avoid version mismatch errors.
+const INSTALLED_PDFJS_VERSION: string = (pdfjsPkg as any)?.version || '4.8.69';
+const VERSIONED_CDN_WORKER = `https://unpkg.com/pdfjs-dist@${INSTALLED_PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+GlobalWorkerOptions.workerSrc = (process.env.NEXT_PUBLIC_PDFJS_WORKER as string) || VERSIONED_CDN_WORKER;
 
 export interface IngestProgress {
   totalPages: number;
@@ -76,5 +83,4 @@ export function useIngest(options: UseIngestOptions = {}) {
 
   return { ingestPdf, progress };
 }
-
 

@@ -1,8 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    appDir: true,
-  },
   output: 'standalone',
   env: {
     BACKEND_API_URL: process.env.BACKEND_API_URL || 'http://api:8080',

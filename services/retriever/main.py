@@ -30,6 +30,9 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "colpali_multivector_collection")
 DEVICE = os.getenv("DEVICE", "cpu")
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 TOP_K_DEFAULT = int(os.getenv("TOP_K", "5"))
+# Some vision-text models require text tokens even for image-only forward passes.
+# Provide a minimal prompt to ensure input_ids are present when encoding images.
+INGEST_TEXT_PROMPT = os.getenv("INGEST_TEXT_PROMPT", " ")
 
 app = FastAPI(title="Retriever (Milvus)", version="0.1.0")
 
@@ -60,12 +63,32 @@ def _pil_from_b64(b64: str) -> Image.Image:
 
 @torch.no_grad()
 def _get_embeddings(proc: Any, mdl: Any, inputs: Dict[str, Any]) -> torch.Tensor:
+    """Return token-level embeddings for either text or image inputs.
+
+    Supports common HF vision-text models like CLIP/SigLIP where token-level
+    outputs live under text_model_output/vision_model_output, and falls back
+    to top-level last_hidden_state when available.
+    """
     outputs = mdl(**inputs)
-    if hasattr(outputs, "last_hidden_state"):
-        tokens = outputs.last_hidden_state  # [1, T, D]
-    else:
-        # Fallback for models that return tuple
-        tokens = outputs[0]
+    tokens = None
+    # Prefer explicit branches when we know the modality
+    if "pixel_values" in inputs and hasattr(outputs, "vision_model_output"):
+        vout = getattr(outputs, "vision_model_output")
+        if hasattr(vout, "last_hidden_state"):
+            tokens = vout.last_hidden_state
+    if tokens is None and "input_ids" in inputs and hasattr(outputs, "text_model_output"):
+        tout = getattr(outputs, "text_model_output")
+        if hasattr(tout, "last_hidden_state"):
+            tokens = tout.last_hidden_state
+    # Generic fallback
+    if tokens is None and hasattr(outputs, "last_hidden_state"):
+        tokens = outputs.last_hidden_state
+    if tokens is None:
+        # Last resort: try tuple-like access
+        try:
+            tokens = outputs[0]
+        except Exception:
+            raise RuntimeError("Model output does not provide token-level representations")
     return tokens.squeeze(0)
 
 
@@ -163,7 +186,8 @@ def ingest(body: IngestRequest):
         if not body.pages:
             return {"status": "no-op", "pages_added": 0}
         sample_img = _pil_from_b64(body.pages[0].image_b64)
-        sample_inputs = proc(images=sample_img, return_tensors="pt").to(DEVICE)
+        # Include a minimal text prompt to satisfy models that require input_ids
+        sample_inputs = proc(images=sample_img, text=INGEST_TEXT_PROMPT, return_tensors="pt").to(DEVICE)
         sample_tokens = _get_embeddings(proc, mdl, sample_inputs)
         dimension = int(sample_tokens.shape[-1])
         client = _ensure_milvus(dimension)
@@ -175,7 +199,8 @@ def ingest(body: IngestRequest):
             out_path = _image_path_for_page_id(item.page_id)
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             img.save(out_path)
-            inputs = proc(images=img, return_tensors="pt").to(DEVICE)
+            # Always include a minimal text prompt to ensure input_ids exist
+            inputs = proc(images=img, text=INGEST_TEXT_PROMPT, return_tensors="pt").to(DEVICE)
             d_tokens = _get_embeddings(proc, mdl, inputs)  # [T, D]
             entities = [
                 {"vector": vec.detach().cpu().numpy().tolist(), "page_id": item.page_id}
@@ -330,5 +355,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("services.retriever.main:app", host="0.0.0.0", port=8081, reload=False)
-
 
