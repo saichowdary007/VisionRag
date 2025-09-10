@@ -61,3 +61,4 @@ data/
 # Web build artefacts
 web/node_modules/
 web/dist/
+.env
