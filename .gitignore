@@ -62,4 +62,37 @@ data/
 web/node_modules/
 web/dist/
 node_modules/
+.next/
 .env
+
+# Build artifacts and caches
+dist/
+build/
+.cache/
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
