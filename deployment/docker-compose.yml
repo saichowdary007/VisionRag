@@ -6,7 +6,7 @@ services:
       dockerfile: ./deployment/retriever.Dockerfile
     environment:
       - MODEL_ID=${MODEL_ID}
-      - MILVUS_URI=${MILVUS_URI}
+      - MILVUS_DB_PATH=${MILVUS_DB_PATH:-/app/milvus_data/milvus.db}
       - COLLECTION_NAME=${COLLECTION_NAME:-colpali_multivector_collection}
       - DEVICE=cpu
       - TOP_K=${TOP_K:-5}
