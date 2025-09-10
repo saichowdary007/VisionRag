@@ -1,0 +1,36 @@
+version: "3.8"
+services:
+  retriever:
+    build:
+      context: ../
+      dockerfile: ./deployment/retriever.Dockerfile
+    environment:
+      - MODEL_ID=${MODEL_ID}
+      - MILVUS_URI=${MILVUS_URI}
+      - COLLECTION_NAME=${COLLECTION_NAME:-colpali_multivector_collection}
+      - DEVICE=cpu
+      - TOP_K=${TOP_K:-5}
+      - DATA_DIR=/data
+    volumes:
+      - ../milvus_data:/app/milvus_data
+    platform: linux/arm64
+    ports:
+      - "8081:8081"
+
+  api:
+    build:
+      context: ../
+      dockerfile: ./deployment/api.Dockerfile
+    environment:
+      - RETRIEVER_URL=http://retriever:8081
+      - VLM_BASE_URL=${VLM_BASE_URL}
+      - VLM_MODEL=${VLM_MODEL}
+      - TOP_K=${TOP_K:-5}
+      - MAX_IMAGES=${MAX_IMAGES:-3}
+    depends_on:
+      - retriever
+    platform: linux/arm64
+    ports:
+      - "8080:8080"
+
+
