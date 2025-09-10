@@ -1,7 +1,9 @@
 import React from 'react';
-import { MessageSquare, Sun, Moon, Trash2 } from 'lucide-react';
+import { MessageSquare, Sun, Moon, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useTheme } from '@/hooks/useTheme';
+import { useIngest } from '@/hooks/useIngest';
+import React from 'react';
 
 interface ChatHeaderProps {
   onClearMessages: () => void;
@@ -10,6 +12,37 @@ interface ChatHeaderProps {
 
 export function ChatHeader({ onClearMessages, messageCount }: ChatHeaderProps) {
   const { theme, toggleTheme } = useTheme();
+  const { ingestPdf, progress } = useIngest({ jpegQuality: 0.9, maxPages: 20 });
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleUploadClick = () => fileInputRef.current?.click();
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      alert('Please select a PDF file.');
+      e.target.value = '';
+      return;
+    }
+    // Basic size validation (<= 25MB)
+    const MAX_BYTES = 25 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      alert('PDF is too large (max 25MB).');
+      e.target.value = '';
+      return;
+    }
+    const docId = `${file.name.replace(/\.[^/.]+$/, '')}`;
+    try {
+      await ingestPdf(file, docId);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to ingest PDF.');
+    } finally {
+      e.target.value = '';
+    }
+  };
 
   return (
     <div className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3">
@@ -29,6 +62,24 @@ export function ChatHeader({ onClearMessages, messageCount }: ChatHeaderProps) {
         </div>
 
         <div className="flex items-center space-x-2">
+          {/* PDF Upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={onFileChange}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleUploadClick}
+            className="w-9 h-9 p-0"
+            title="Upload PDF"
+          >
+            <Upload className="w-4 h-4" />
+          </Button>
+
           {/* Theme Toggle */}
           <Button
             variant="ghost"
@@ -58,6 +109,19 @@ export function ChatHeader({ onClearMessages, messageCount }: ChatHeaderProps) {
           )}
         </div>
       </div>
+      {progress.status !== 'idle' && progress.status !== 'done' && (
+        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          <span className="font-medium">Ingestion:</span> {progress.status}
+          {typeof progress.currentPage === 'number' && (
+            <>
+              {' '}({progress.completedPages}/{progress.totalPages})
+            </>
+          )}
+          {progress.status === 'error' && progress.error && (
+            <span className="text-red-500"> — {progress.error}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

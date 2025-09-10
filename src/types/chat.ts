@@ -21,3 +21,14 @@ export interface StreamResponse {
   content: string;
   done: boolean;
 }
+
+// Backend contracts
+export interface RetrieverHit {
+  page_id: string;
+  score: number;
+}
+
+export interface QueryResponse {
+  answer: string;
+  hits: RetrieverHit[];
+}

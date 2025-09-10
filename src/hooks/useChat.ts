@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { Message, ChatState } from '@/types/chat';
+import { Message, ChatState, RetrieverHit } from '@/types/chat';
 import { generateId } from '@/lib/utils';
 
 const STORAGE_KEY = 'chat-messages';
@@ -121,6 +121,7 @@ export function useChat() {
       }
 
       let accumulatedContent = '';
+      let hits: RetrieverHit[] | undefined;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -143,6 +144,9 @@ export function useChat() {
 
             try {
               const parsed = JSON.parse(data);
+              if (Array.isArray(parsed.hits)) {
+                hits = parsed.hits;
+              }
               if (parsed.content) {
                 accumulatedContent += parsed.content;
                 updateMessage(assistantMessage.id, {

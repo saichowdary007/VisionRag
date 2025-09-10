@@ -33,4 +33,16 @@ services:
     ports:
       - "8080:8080"
 
+  frontend:
+    build:
+      context: ../
+      dockerfile: ./deployment/frontend.Dockerfile
+    environment:
+      - BACKEND_API_URL=http://api:8080
+      - RETRIEVER_URL=http://retriever:8081
+    depends_on:
+      - api
+    platform: linux/arm64
+    ports:
+      - "3000:3000"
 

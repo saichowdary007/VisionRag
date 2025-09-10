@@ -57,10 +57,11 @@ src/
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ 
-- npm or yarn
+- Node.js 18+ (for local development)
+- npm or yarn (for local development)
+- Docker and Docker Compose (for containerized deployment)
 
-### Installation
+### Local Development
 
 1. **Clone and install dependencies:**
    ```bash
@@ -74,6 +75,60 @@ src/
 
 3. **Open your browser:**
    Navigate to [http://localhost:3000](http://localhost:3000)
+
+### Docker Deployment
+
+To run the entire application stack (frontend, backend API, and retriever) in Docker:
+
+1. **Ensure Docker and Docker Compose are installed**
+
+2. **Configure environment variables:**
+   Create a `.env` file in the root directory:
+   ```bash
+   # VLM Configuration
+   VLM_BASE_URL=http://host.docker.internal:11434/v1
+   VLM_MODEL=qwen2.5-vl:7b
+
+   # Retriever Configuration
+   MODEL_ID=vidore/colpali-v1.3
+   MILVUS_URI=./milvus_data/milvus.db
+   COLLECTION_NAME=colpali_multivector_collection
+   TOP_K=5
+   MAX_IMAGES=3
+   ```
+
+3. **Build and run the entire stack:**
+   ```bash
+   # Option 1: Use the convenience script (recommended)
+   ./run-docker.sh
+
+   # Option 2: Manual commands
+   cd deployment
+   docker compose up --build
+   ```
+
+4. **Access the application:**
+   - Frontend: [http://localhost:3000](http://localhost:3000)
+   - Backend API: [http://localhost:8080](http://localhost:8080)
+   - Retriever: [http://localhost:8081](http://localhost:8081)
+
+### Services Architecture
+
+- **Frontend**: Next.js application with PDF upload and chat interface
+- **API Gateway**: FastAPI service that orchestrates queries and responses
+- **Retriever**: FastAPI service with ColPali model for document search and vector storage
+- **VLM**: External Ollama service for vision-language model inference
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VLM_BASE_URL` | URL for the VLM service | `http://host.docker.internal:11434/v1` |
+| `VLM_MODEL` | Vision-language model to use | `qwen2.5-vl:7b` |
+| `MODEL_ID` | Document embedding model | `vidore/colpali-v1.3` |
+| `MILVUS_URI` | Milvus database URI | `./milvus_data/milvus.db` |
+| `TOP_K` | Number of top results to retrieve | `5` |
+| `MAX_IMAGES` | Maximum images to include in responses | `3` |
 
 ## API Integration
 
@@ -162,10 +217,41 @@ The app can be deployed to any platform that supports Next.js:
 2. **Theme not persisting**: Verify localStorage is available
 3. **Messages not saving**: Check browser storage permissions
 
+### Docker Issues
+
+1. **Build failures**: Ensure you have enough disk space and Docker Desktop is running
+2. **Service not starting**: Check logs with `docker compose logs [service-name]`
+3. **Port conflicts**: If ports 3000, 8080, or 8081 are in use, stop conflicting services
+4. **VLM connection issues**: Ensure Ollama is running locally and accessible at `http://host.docker.internal:11434`
+5. **Memory issues**: Increase Docker Desktop memory allocation if builds fail
+6. **Apple Silicon**: All services use `platform: linux/arm64` for compatibility
+
 ### Debug Mode
 Enable debug logging by adding to your environment:
 ```bash
 NODE_ENV=development
+```
+
+### Docker Commands
+
+```bash
+# View service status
+docker compose ps
+
+# View logs
+docker compose logs -f
+
+# View specific service logs
+docker compose logs -f frontend
+
+# Stop all services
+docker compose down
+
+# Rebuild specific service
+docker compose up --build frontend
+
+# Clean up
+docker compose down --volumes --remove-orphans
 ```
 
 ## Future Enhancements
