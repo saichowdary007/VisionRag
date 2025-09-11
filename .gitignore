@@ -46,6 +46,7 @@ uvicorn.pid
 
 # Data files
 data/
+local_data/
 *.db
 *.faiss
 *.bin

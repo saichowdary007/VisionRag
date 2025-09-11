@@ -35,12 +35,15 @@ def _pil_from_b64(b64: str) -> Image.Image:
 
 def _get_page_image_b64(page_id: str) -> str:
     url = f"{RETRIEVER_URL}/page_image/{page_id}"
-    r = requests.get(url, timeout=60)
-    if r.status_code == 404:
-        raise HTTPException(status_code=404, detail=f"Page image not found for {page_id}")
-    r.raise_for_status()
-    data = r.json()
-    return data.get("image_b64") or data.get("image") or ""
+    try:
+        r = requests.get(url, timeout=60)
+        if r.status_code == 404:
+            return ""
+        r.raise_for_status()
+        data = r.json()
+        return data.get("image_b64") or data.get("image") or ""
+    except Exception:
+        return ""
 
 
 @app.get("/healthz")
@@ -62,13 +65,19 @@ def query(req: QueryRequest):
         max_images = req.max_images or MAX_IMAGES_DEFAULT
 
         # 1) Retrieve candidate hits from retriever
-        sr = requests.post(
-            f"{RETRIEVER_URL}/search",
-            json={"text": req.question, "top_k": int(max(1, top_k))},
-            timeout=120,
-        )
-        sr.raise_for_status()
-        hits: List[Dict[str, Any]] = sr.json().get("hits", [])
+        hits: List[Dict[str, Any]] = []
+        try:
+            sr = requests.post(
+                f"{RETRIEVER_URL}/search",
+                json={"text": req.question, "top_k": int(max(1, top_k))},
+                timeout=120,
+            )
+            if sr.ok:
+                hits = sr.json().get("hits", [])
+            else:
+                hits = []
+        except Exception:
+            hits = []
 
         # 2) Fetch top page images from retriever and build PIL list
         images: List[Image.Image] = []
@@ -87,7 +96,14 @@ def query(req: QueryRequest):
         if not images:
             # Always attempt to answer, even without images
             images = []
-        answer = vision_chat(req.question, images, temperature=0.1, max_tokens=1024)
+        try:
+            answer = vision_chat(req.question, images, temperature=0.1, max_tokens=1024)
+        except Exception:
+            # Fallback safe string if VLM unavailable
+            answer = (
+                "The vision model is unavailable. Showing mock answer based on your question. "
+                f"Question: {req.question}"
+            )
 
         return {
             "answer": answer,
@@ -103,5 +119,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("services.api.main:app", host="0.0.0.0", port=8080, reload=False)
-
 

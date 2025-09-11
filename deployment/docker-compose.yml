@@ -40,6 +40,7 @@ services:
   milvus:
     container_name: milvus-standalone
     image: milvusdb/milvus:v2.3.12
+    command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -66,12 +67,15 @@ services:
       context: ../
       dockerfile: ./deployment/retriever.Dockerfile
     environment:
-      - MODEL_ID=${MODEL_ID}
+      - MODEL_ID=${MODEL_ID:-vidore/colpali-v1.3}
       - MILVUS_URI=http://milvus:19530
       - COLLECTION_NAME=${COLLECTION_NAME:-colpali_multivector_collection}
       - DEVICE=cpu
       - TOP_K=${TOP_K:-5}
       - DATA_DIR=/data
+      - LOCAL_DATA_DIR=/data_local
+      - RETRIEVER_MODE=${RETRIEVER_MODE:-mock}
+      - EMBED_DIM=${EMBED_DIM:-64}
     depends_on:
       milvus:
         condition: service_healthy
@@ -112,4 +116,3 @@ volumes:
   etcd:
   minio:
   milvus:
-

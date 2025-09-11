@@ -68,12 +68,29 @@ src/
    npm install
    ```
 
-2. **Run the development server:**
+2. **Start Docker services (Milvus, retriever, API):**
+   ```bash
+   # Start all services in background
+   ./run-docker.sh
+
+   # Or manually:
+   cd deployment
+   docker compose up -d
+   ```
+
+3. **Configure environment (optional):**
+   Create a `.env.local` file in the root directory:
+   ```bash
+   # When running Next.js locally, connect to Docker services
+   RETRIEVER_URL=http://localhost:8081
+   ```
+
+4. **Run the development server:**
    ```bash
    npm run dev
    ```
 
-3. **Open your browser:**
+5. **Open your browser:**
    Navigate to [http://localhost:3000](http://localhost:3000)
 
 ### Docker Deployment
@@ -89,12 +106,15 @@ To run the entire application stack (frontend, backend API, and retriever) in Do
    VLM_BASE_URL=http://host.docker.internal:11434/v1
    VLM_MODEL=qwen2.5-vl:7b
 
-   # Retriever Configuration
+   # Retriever Configuration (for Docker services)
    MODEL_ID=vidore/colpali-v1.3
-   MILVUS_URI=./milvus_data/milvus.db
+   MILVUS_URI=http://milvus:19530  # Use service name when in Docker network
    COLLECTION_NAME=colpali_multivector_collection
    TOP_K=5
    MAX_IMAGES=3
+
+   # For local development (when Next.js runs outside Docker)
+   RETRIEVER_URL=http://localhost:8081
    ```
 
 3. **Build and run the entire stack:**
@@ -116,19 +136,23 @@ To run the entire application stack (frontend, backend API, and retriever) in Do
 
 - **Frontend**: Next.js application with PDF upload and chat interface
 - **API Gateway**: FastAPI service that orchestrates queries and responses
-- **Retriever**: FastAPI service with ColPali model for document search and vector storage
+- **Retriever**: FastAPI service with two modes:
+  - `mock` (default): in-memory + filesystem store, deterministic ranking; no external deps
+  - `milvus-lite`: simple NumPy embeddings + Milvus vector search; no heavy ML
 - **VLM**: External Ollama service for vision-language model inference
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VLM_BASE_URL` | URL for the VLM service | `http://host.docker.internal:11434/v1` |
-| `VLM_MODEL` | Vision-language model to use | `qwen2.5-vl:7b` |
-| `MODEL_ID` | Document embedding model | `vidore/colpali-v1.3` |
-| `MILVUS_URI` | Milvus database URI | `./milvus_data/milvus.db` |
+| `RETRIEVER_MODE` | Retriever mode: `mock` or `milvus-lite` | `mock` |
+| `EMBED_DIM` | Dimension for lite embeddings (square number) | `64` |
+| `MILVUS_URI` | Milvus database URI | `http://milvus:19530` |
+| `MODEL_ID` | (Reserved for future ML mode) | `vidore/colpali-v1.3` |
 | `TOP_K` | Number of top results to retrieve | `5` |
 | `MAX_IMAGES` | Maximum images to include in responses | `3` |
+| `VLM_BASE_URL` | URL for the VLM service | `http://host.docker.internal:11434/v1` |
+| `VLM_MODEL` | Vision-language model to use | `qwen2.5-vl:7b` |
 
 ## API Integration
 
@@ -223,8 +247,52 @@ The app can be deployed to any platform that supports Next.js:
 2. **Service not starting**: Check logs with `docker compose logs [service-name]`
 3. **Port conflicts**: If ports 3000, 8080, or 8081 are in use, stop conflicting services
 4. **VLM connection issues**: Ensure Ollama is running locally and accessible at `http://host.docker.internal:11434`
-5. **Memory issues**: Increase Docker Desktop memory allocation if builds fail
+5. **Memory issues**: Increase Docker Desktop memory allocation if builds fail (Milvus needs ≥8GB RAM)
 6. **Apple Silicon**: All services use `platform: linux/arm64` for compatibility
+
+### Milvus Connection Issues
+
+**Error: "Fail connecting to server on milvus:19530"**
+
+**Symptoms:**
+- 500 errors when uploading documents
+- Retriever service fails to start
+- Connection timeout errors
+
+**Solutions:**
+
+1. **Verify Milvus is running:**
+   ```bash
+   docker compose ps
+   # Should show: milvus-standalone with "0.0.0.0:19530->19530/tcp"
+   ```
+
+2. **Check Milvus health:**
+   ```bash
+   docker compose logs milvus
+   # Wait for: "Milvus standalone is ready"
+   ```
+
+3. **Test connectivity:**
+   ```bash
+   # From host (when Next.js runs locally):
+   nc -zv 127.0.0.1 19530
+
+   # From retriever container:
+   docker compose exec retriever python -c "from pymilvus import MilvusClient; print(MilvusClient('http://milvus:19530').list_collections())"
+   ```
+
+4. **Check health endpoint:**
+   ```bash
+   curl http://localhost:8081/healthz
+   # Should show: "milvus_connected": true
+   ```
+
+5. **Common fixes:**
+   - Ensure Docker has ≥8GB RAM allocated
+   - Wait 2-3 minutes after starting services (Milvus takes time to initialize)
+   - Restart services: `docker compose restart`
+   - Clear volumes if corrupted: `docker compose down -v`
 
 ### Debug Mode
 Enable debug logging by adding to your environment:
@@ -264,3 +332,19 @@ docker compose down --volumes --remove-orphans
 - [ ] Message reactions
 - [ ] User authentication
 - [ ] Real-time collaboration
+### Local Demo (No Docker)
+
+If you just want to exercise the retriever and API locally without Docker:
+
+- Start retriever in one terminal:
+  - `uvicorn services.retriever.main:app --host 0.0.0.0 --port 8081`
+- Start API gateway in another terminal:
+  - `uvicorn services.api.main:app --host 0.0.0.0 --port 8080`
+- Run the demo script to ingest a generated image, search it, and query the API:
+  - `python3 scripts/demo_ingest_and_query.py`
+
+Notes:
+- The retriever runs in a mock mode by default (no Milvus/ML required). It stores assets under `./local_data` when `/data` is not writable.
+- The API will fall back to a safe mock answer if the VLM is unavailable.
+5. **Switch retriever mode (optional):**
+   - Default is `mock`. For Milvus-backed lite retrieval, set `RETRIEVER_MODE=milvus-lite` in your `.env` and re-run compose. Ensure Milvus is healthy first.

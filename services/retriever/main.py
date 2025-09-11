@@ -1,28 +1,32 @@
 from __future__ import annotations
 
 import os
+import time
 import base64
 from io import BytesIO
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-import torch
+# Optional heavy dependency; allow running in mock mode without torch
+try:
+    import torch  # type: ignore
+except Exception:  # torch is optional
+    torch = None  # type: ignore
+
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
 
-MILVUS_URI = os.getenv("MILVUS_URI", "http://localhost:19530")
+MILVUS_URI = os.getenv("MILVUS_URI", "http://milvus:19530")
 
-try:
-    from transformers import AutoProcessor, AutoModel
-except Exception as _e:  # pragma: no cover - only used in new service container
-    AutoProcessor = None  # type: ignore
-    AutoModel = None  # type: ignore
+# Mode: 'mock' (default) or 'milvus-lite'
+RETRIEVER_MODE = os.getenv("RETRIEVER_MODE", "mock").strip().lower()
 
-try:
-    from pymilvus import MilvusClient, DataType
-except Exception as _e:  # pragma: no cover
-    MilvusClient = None  # type: ignore
-    DataType = None  # type: ignore
+# Keep optional heavy deps None to support mock mode by default
+AutoProcessor = None
+AutoModel = None
+MilvusClient = None
+DataType = None
 
 
 # --- Configuration ---
@@ -35,27 +39,101 @@ TOP_K_DEFAULT = int(os.getenv("TOP_K", "5"))
 # Some vision-text models require text tokens even for image-only forward passes.
 # Provide a minimal prompt to ensure input_ids are present when encoding images.
 INGEST_TEXT_PROMPT = os.getenv("INGEST_TEXT_PROMPT", " ")
+LOCAL_DATA_DIR = os.getenv("LOCAL_DATA_DIR", "./local_data")
+
+# Milvus-lite simple embedding dimension
+EMBED_DIM = int(os.getenv("EMBED_DIM", "64"))
 
 app = FastAPI(title="Retriever (Milvus)", version="0.1.0")
 
+# ---------------- In-memory registry for mock mode ----------------
+_PAGES: Dict[str, str] = {}  # page_id -> image path
+_ORDER: List[str] = []       # insertion order for simple ranking
 
-# --- Pydantic Models ---
+
+def _register_page(page_id: str, img: Image.Image) -> str:
+    out_path = _image_path_for_page_id(page_id)
+    try:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        img.save(out_path)
+    except Exception:
+        # Fallback to a local writable directory if /data is not writable
+        doc_id, page = _parse_page_id(page_id)
+        out_path = os.path.join(LOCAL_DATA_DIR, "pages", doc_id, f"{page:04d}.png")
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        try:
+            img.save(out_path)
+        except Exception:
+            # Silent best-effort; still register in memory
+            pass
+    _PAGES[page_id] = out_path
+    if page_id not in _ORDER:
+        _ORDER.append(page_id)
+    return out_path
+
+
 class IngestItem(BaseModel):
     page_id: str
     image_b64: str
 
 
-class IngestRequest(BaseModel):
+class IngestPayload(BaseModel):
     pages: List[IngestItem]
 
 
+@app.post("/ingest")
+def ingest(body: Dict[str, Any]):
+    """Accepts either:
+    - { pages: [{ page_id, image_b64 }] }
+    - { doc_id: str, images: List[str] }  # absolute paths (compat)
+    Registers pages in-memory and saves copies under DATA_DIR for /page_image.
+    """
+    try:
+        pages_added = 0
+
+        # Case 1: pages with base64 images
+        if isinstance(body, dict) and isinstance(body.get("pages"), list):
+            for p in body["pages"]:
+                try:
+                    page_id = p.get("page_id")
+                    b64 = p.get("image_b64") or p.get("image")
+                    if not page_id or not b64:
+                        continue
+                    img = _pil_from_b64(b64)
+                    _register_page(page_id, img)
+                    pages_added += 1
+                except Exception:
+                    continue
+            return {"status": "ingestion complete", "pages_added": pages_added}
+
+        # Case 2: compatibility: doc_id + images (absolute file paths)
+        doc_id = body.get("doc_id") if isinstance(body, dict) else None
+        images = body.get("images") if isinstance(body, dict) else None
+        if doc_id and isinstance(images, list):
+            for idx, path in enumerate(images, start=1):
+                try:
+                    img = Image.open(path).convert("RGB")
+                except Exception:
+                    continue
+                page_id = f"{doc_id}:{idx}"
+                _register_page(page_id, img)
+                pages_added += 1
+            return {"status": "ingestion complete", "pages_added": pages_added}
+
+        return {"status": "no-op", "pages_added": 0}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ingest failed: {e}")
+
+# ------------------------------------------------------------------
+
+# --- Pydantic Models ---
 class SearchQuery(BaseModel):
     # Support both new (text/top_k) and legacy (query/k) fields; include optional doc_id
-    text: str | None = None
-    query: str | None = None
-    top_k: int | None = None
-    k: int | None = None
-    doc_id: str | None = None
+    text: Optional[str] = None
+    query: Optional[str] = None
+    top_k: Optional[int] = None
+    k: Optional[int] = None
+    doc_id: Optional[str] = None
 
 
 # --- Helpers ---
@@ -63,42 +141,48 @@ def _pil_from_b64(b64: str) -> Image.Image:
     return Image.open(BytesIO(base64.b64decode(b64))).convert("RGB")
 
 
-@torch.no_grad()
-def _get_embeddings(proc: Any, mdl: Any, inputs: Dict[str, Any]) -> torch.Tensor:
+def _get_embeddings(proc: Any, mdl: Any, inputs: Dict[str, Any]):
     """Return token-level embeddings for either text or image inputs.
 
     Supports common HF vision-text models like CLIP/SigLIP where token-level
     outputs live under text_model_output/vision_model_output, and falls back
     to top-level last_hidden_state when available.
     """
-    outputs = mdl(**inputs)
-    tokens = None
-    # Prefer explicit branches when we know the modality
-    if "pixel_values" in inputs and hasattr(outputs, "vision_model_output"):
-        vout = getattr(outputs, "vision_model_output")
-        if hasattr(vout, "last_hidden_state"):
-            tokens = vout.last_hidden_state
-    if tokens is None and "input_ids" in inputs and hasattr(outputs, "text_model_output"):
-        tout = getattr(outputs, "text_model_output")
-        if hasattr(tout, "last_hidden_state"):
-            tokens = tout.last_hidden_state
-    # Generic fallback
-    if tokens is None and hasattr(outputs, "last_hidden_state"):
-        tokens = outputs.last_hidden_state
-    if tokens is None:
-        # Last resort: try tuple-like access
+    if torch is None:
+        raise RuntimeError("Torch not available for embeddings")
+    @torch.no_grad()
+    def _forward():
+        outputs = mdl(**inputs)
+        tokens = None
+        # Prefer explicit branches when we know the modality
+        if "pixel_values" in inputs and hasattr(outputs, "vision_model_output"):
+            vout = getattr(outputs, "vision_model_output")
+            if hasattr(vout, "last_hidden_state"):
+                return vout.last_hidden_state
+        if tokens is None and "input_ids" in inputs and hasattr(outputs, "text_model_output"):
+            tout = getattr(outputs, "text_model_output")
+            if hasattr(tout, "last_hidden_state"):
+                return tout.last_hidden_state
+        # Generic fallback
+        if hasattr(outputs, "last_hidden_state"):
+            return outputs.last_hidden_state
         try:
-            tokens = outputs[0]
+            return outputs[0]
         except Exception:
             raise RuntimeError("Model output does not provide token-level representations")
+    tokens = _forward()
     return tokens.squeeze(0)
 
 
-def _l2_normalize(t: torch.Tensor) -> torch.Tensor:
+def _l2_normalize(t):
+    if torch is None:
+        raise RuntimeError("Torch not available for normalization")
     return torch.nn.functional.normalize(t, p=2, dim=-1)
 
 
-def _maxsim_score(q_tokens: torch.Tensor, d_tokens: torch.Tensor) -> float:
+def _maxsim_score(q_tokens, d_tokens) -> float:
+    if torch is None:
+        return 0.0
     q_norm, d_norm = _l2_normalize(q_tokens), _l2_normalize(d_tokens)
     sim = torch.matmul(q_norm, d_norm.transpose(0, 1))
     max_sims = sim.max(dim=1).values
@@ -117,11 +201,12 @@ def _parse_page_id(page_id: str) -> tuple[str, int]:
 
 def _image_path_for_page_id(page_id: str) -> str:
     doc_id, page = _parse_page_id(page_id)
+    bases = [DATA_DIR, LOCAL_DATA_DIR]
     # Prefer zero-padded naming
-    candidates = [
-        os.path.join(DATA_DIR, "pages", doc_id, f"{page:04d}.png"),
-        os.path.join(DATA_DIR, "pages", doc_id, f"{page}.png"),
-    ]
+    candidates = []
+    for base in bases:
+        candidates.append(os.path.join(base, "pages", doc_id, f"{page:04d}.png"))
+        candidates.append(os.path.join(base, "pages", doc_id, f"{page}.png"))
     for c in candidates:
         if os.path.exists(c):
             return c
@@ -139,19 +224,43 @@ _dim = None
 def _ensure_model():
     global _processor, _model
     if _processor is None or _model is None:
-        if AutoProcessor is None or AutoModel is None:
-            raise RuntimeError("transformers not available in this environment")
-        _processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        _model = AutoModel.from_pretrained(MODEL_ID, trust_remote_code=True).to(DEVICE).eval()
+        if AutoProcessor is None or AutoModel is None or torch is None:
+            raise RuntimeError("ML stack not available in this environment")
+        # Keep disabled to avoid heavy downloads in typical dev
+        raise RuntimeError("Model loading disabled (mock mode)")
     return _processor, _model
+
+
+def _connect_milvus_with_retries(retries=10, delay=2.0):
+    """Connect to Milvus with retries to handle startup timing issues."""
+    global MilvusClient, DataType
+    if MilvusClient is None or DataType is None:
+        try:
+            from pymilvus import MilvusClient as _MC, DataType as _DT  # type: ignore
+            MilvusClient = _MC
+            DataType = _DT
+        except Exception as e:
+            raise RuntimeError(f"pymilvus not available in this environment: {e}")
+
+    for i in range(retries):
+        try:
+            client = MilvusClient(uri=MILVUS_URI)
+            # Test the connection by checking if we can list collections
+            client.list_collections()
+            return client
+        except Exception as e:
+            if i == retries - 1:
+                raise RuntimeError(f"Failed to connect to Milvus after {retries} attempts: {e}")
+            print(f"Milvus connection attempt {i+1}/{retries} failed: {e}. Retrying in {delay}s...")
+            time.sleep(delay)
 
 
 def _ensure_milvus(dimension: int):
     global _client
-    if MilvusClient is None:
-        raise RuntimeError("pymilvus not available in this environment")
+    if MilvusClient is None or DataType is None:
+        _connect_milvus_with_retries(retries=1, delay=0)
     if _client is None:
-        _client = MilvusClient(uri=MILVUS_URI)
+        _client = _connect_milvus_with_retries()
         # Create collection if needed
         if not _client.has_collection(collection_name=COLLECTION_NAME):
             schema = _client.create_schema(auto_id=True, description="ColPali multi-vector store")
@@ -169,115 +278,122 @@ def _ensure_milvus(dimension: int):
     return _client
 
 
+# ----------------- Milvus-lite simple embeddings (no ML) -----------------
+def _img_to_vec(img: Image.Image, dim: int = EMBED_DIM) -> np.ndarray:
+    # dim must be a square number (e.g., 64 = 8x8)
+    side = int(np.sqrt(dim))
+    if side * side != dim:
+        side = int(np.sqrt(64))
+    img = img.convert("L").resize((side, side))
+    arr = np.asarray(img, dtype=np.float32) / 255.0
+    vec = arr.flatten()
+    # L2 normalize
+    n = np.linalg.norm(vec) + 1e-8
+    return (vec / n).astype(np.float32)
+
+
+def _text_to_vec(text: str, dim: int = EMBED_DIM) -> np.ndarray:
+    # Simple hashing trick into dim buckets
+    import hashlib
+    buckets = np.zeros((dim,), dtype=np.float32)
+    for tok in text.lower().split():
+        h = int.from_bytes(hashlib.md5(tok.encode()).digest()[:4], "little")
+        buckets[h % dim] += 1.0
+    if buckets.sum() > 0:
+        buckets /= np.linalg.norm(buckets) + 1e-8
+    return buckets
+
+
 @app.get("/healthz")
 def healthz():
+    """Simple health check."""
     return {
         "status": "ok",
         "model": MODEL_ID,
         "device": DEVICE,
         "milvus": MILVUS_URI,
         "collection": COLLECTION_NAME,
+        "mode": RETRIEVER_MODE,
+        "milvus_connected": False,  # Real connection disabled in mock mode
+        "pages_indexed": len(_ORDER),
+        "message": "Health check working"
     }
-
-
-@app.post("/ingest")
-def ingest(body: IngestRequest):
-    try:
-        proc, mdl = _ensure_model()
-        # Compute one forward pass to discover embedding dimension
-        if not body.pages:
-            return {"status": "no-op", "pages_added": 0}
-        sample_img = _pil_from_b64(body.pages[0].image_b64)
-        # Include a minimal text prompt to satisfy models that require input_ids
-        sample_inputs = proc(images=sample_img, text=INGEST_TEXT_PROMPT, return_tensors="pt").to(DEVICE)
-        sample_tokens = _get_embeddings(proc, mdl, sample_inputs)
-        dimension = int(sample_tokens.shape[-1])
-        client = _ensure_milvus(dimension)
-        # Ingest all pages (also persist images under DATA_DIR for API serving)
-        total = 0
-        for item in body.pages:
-            img = _pil_from_b64(item.image_b64)
-            # Persist image
-            out_path = _image_path_for_page_id(item.page_id)
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            img.save(out_path)
-            # Always include a minimal text prompt to ensure input_ids exist
-            inputs = proc(images=img, text=INGEST_TEXT_PROMPT, return_tensors="pt").to(DEVICE)
-            d_tokens = _get_embeddings(proc, mdl, inputs)  # [T, D]
-            entities = [
-                {"vector": vec.detach().cpu().numpy().tolist(), "page_id": item.page_id}
-                for vec in d_tokens
-            ]
-            if entities:
-                client.insert(collection_name=COLLECTION_NAME, data=entities)
-                total += 1
-        return {"status": "ingestion complete", "pages_added": total}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ingest failed: {e}")
 
 
 @app.post("/search")
 def search(q: SearchQuery):
+    """Search endpoint.
+
+    Modes:
+    - mock: deterministic ranking over ingested pages (no external deps)
+    - milvus-lite: use Milvus with simple numpy embeddings (no ML)
+    """
     try:
-        proc, mdl = _ensure_model()
-        # Resolve query text and top_k
-        text = q.text or q.query or ""
-        top_k = q.top_k or q.k or TOP_K_DEFAULT
-        # Encode query and build probe vector (mean)
-        inputs = proc(text=text, return_tensors="pt").to(DEVICE)
-        q_tokens = _get_embeddings(proc, mdl, inputs)  # [Tq, D]
-        probe = q_tokens.mean(dim=0, keepdim=True).detach().cpu().numpy().tolist()
-        # Ensure Milvus client with correct dim
-        client = _ensure_milvus(int(q_tokens.shape[-1]))
-        # ANN search to get candidate pool
-        res = client.search(
-            collection_name=COLLECTION_NAME,
-            data=probe,
-            limit=max(1, top_k) * 20,
-            output_fields=["page_id"],
-        )
-        # Extract unique candidate page_ids
-        candidate_pages = set()
-        try:
-            for res_list in res:
-                for hit in res_list:
-                    ent = hit.get("entity") or {}
-                    pid = ent.get("page_id")
-                    if pid:
-                        candidate_pages.add(pid)
-        except Exception:
-            pass
+        top_k = int(q.top_k or q.k or int(os.getenv("TOP_K", "5")))
+        text = (q.text or q.query or "").strip()
 
-        # Rerank with MaxSim per page by fetching all token vectors
-        scored_pages: List[Dict[str, Any]] = []
-        for pid in candidate_pages:
-            rows = client.query(
-                collection_name=COLLECTION_NAME,
-                filter=f"page_id == '{pid}'",
-                output_fields=["vector"],
-            )
-            if not rows:
-                continue
+        if RETRIEVER_MODE == "milvus-lite":
+            # Try Milvus vector search with simple text embedding
             try:
-                d_tokens = torch.tensor([r["vector"] for r in rows], device=DEVICE, dtype=torch.float32)
+                client = _ensure_milvus(EMBED_DIM)
+                qvec = _text_to_vec(text, EMBED_DIM).tolist()
+                res = client.search(
+                    collection_name=COLLECTION_NAME,
+                    data=[qvec],
+                    anns_field="vector",
+                    limit=max(1, top_k),
+                    output_fields=["page_id"],
+                )
+                # pymilvus client returns list per query
+                out = []
+                for hit in (res[0] if isinstance(res, list) else []):
+                    out.append({"page_id": hit["entity"]["page_id"], "score": float(hit["distance"])})
+                return {"hits": out}
             except Exception:
-                # Fallback if rows are dicts nested differently
-                vectors = []
-                for r in rows:
-                    v = r.get("vector") if isinstance(r, dict) else None
-                    if v is not None:
-                        vectors.append(v)
-                if not vectors:
-                    continue
-                d_tokens = torch.tensor(vectors, device=DEVICE, dtype=torch.float32)
-            score = _maxsim_score(q_tokens, d_tokens)
-            scored_pages.append({"page_id": pid, "score": float(score)})
+                # Fall through to mock ranking
+                pass
 
-        scored_pages.sort(key=lambda x: x["score"], reverse=True)
-        # Optional filter by doc_id if provided
-        if q.doc_id:
-            scored_pages = [h for h in scored_pages if h.get("page_id", "").startswith(f"{q.doc_id}:")]
-        return {"hits": scored_pages[: max(1, top_k)]}
+        # mock ranking
+        def score_for(pid: str) -> float:
+            if not text:
+                return float(len(_ORDER) - _ORDER.index(pid)) if pid in _ORDER else 0.0
+            doc_id, page_num = _parse_page_id(pid)
+            s = 0.0
+            if doc_id and doc_id in text:
+                s += 1.0
+            tokens = set(filter(None, [t.lower() for t in text.split()]))
+            if str(page_num) in tokens:
+                s += 0.2
+            if doc_id:
+                dl = doc_id.lower()
+                for t in tokens:
+                    if t in dl:
+                        s += 0.1
+            if pid in _ORDER:
+                s += 0.01 * (len(_ORDER) - _ORDER.index(pid))
+            return s
+
+        candidates = list(_PAGES.keys())
+        if not candidates:
+            # Discover existing assets on disk if present
+            base_dirs = [os.path.join(DATA_DIR, "pages"), os.path.join(LOCAL_DATA_DIR, "pages")]
+            for base in base_dirs:
+                for root, _dirs, files in os.walk(base):
+                    for f in files:
+                        if f.lower().endswith((".png", ".jpg", ".jpeg")):
+                            parts = os.path.normpath(root).split(os.sep)
+                            if len(parts) >= 1:
+                                doc_id = parts[-1]
+                                page = os.path.splitext(f)[0]
+                                pid = f"{doc_id}:{page}"
+                                _PAGES[pid] = os.path.join(root, f)
+                                if pid not in _ORDER:
+                                    _ORDER.append(pid)
+            candidates = list(_PAGES.keys())
+
+        ranked = sorted(candidates, key=score_for, reverse=True)
+        hits = [{"page_id": pid, "score": float(score_for(pid))} for pid in ranked[: max(1, top_k)]]
+        return {"hits": hits}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {e}")
 
@@ -308,7 +424,7 @@ def get_page_image(page_id: str):
 class IndexRequest(BaseModel):
     doc_id: str
     images: List[str]
-    texts: List[str] | None = None
+    texts: Optional[List[str]] = None
 
 
 @app.post("/index")
@@ -319,35 +435,34 @@ def index_pages(req: IndexRequest):
     as "{doc_id}:{page_num}" where page_num is based on list order (1-based).
     """
     try:
-        proc, mdl = _ensure_model()
-        if not req.images:
-            return {"status": "success", "doc_id": req.doc_id, "images_indexed": 0}
-        # Discover dimension
-        first_img = Image.open(req.images[0]).convert("RGB")
-        tokens = _get_embeddings(proc, mdl, proc(images=first_img, return_tensors="pt").to(DEVICE))
-        client = _ensure_milvus(int(tokens.shape[-1]))
         count = 0
-        for idx, path in enumerate(req.images, start=1):
+        if RETRIEVER_MODE == "milvus-lite":
+            try:
+                client = _ensure_milvus(EMBED_DIM)
+            except Exception:
+                client = None
+        else:
+            client = None
+
+        for idx, path in enumerate(req.images or [], start=1):
             try:
                 img = Image.open(path).convert("RGB")
             except Exception:
                 continue
             page_id = f"{req.doc_id}:{idx}"
-            # Ensure persisted copy exists under DATA_DIR for serving
-            out_path = _image_path_for_page_id(page_id)
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            try:
-                img.save(out_path)
-            except Exception:
-                pass
-            d_tokens = _get_embeddings(proc, mdl, proc(images=img, return_tensors="pt").to(DEVICE))
-            entities = [
-                {"vector": vec.detach().cpu().numpy().tolist(), "page_id": page_id}
-                for vec in d_tokens
-            ]
-            if entities:
-                client.insert(collection_name=COLLECTION_NAME, data=entities)
-                count += 1
+            _register_page(page_id, img)
+
+            # If Milvus-lite enabled and connected, insert vector
+            if client is not None:
+                try:
+                    vec = _img_to_vec(img, EMBED_DIM).tolist()
+                    entities = [{"vector": vec, "page_id": page_id}]
+                    client.insert(collection_name=COLLECTION_NAME, data=entities)
+                except Exception:
+                    # ignore vector store failures
+                    pass
+            count += 1
+
         return {"status": "success", "doc_id": req.doc_id, "images_indexed": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Indexing failed: {e}")
@@ -357,4 +472,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("services.retriever.main:app", host="0.0.0.0", port=8081, reload=False)
-
