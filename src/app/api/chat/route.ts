@@ -14,37 +14,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Try to call backend /query, fallback to mock if unavailable
-    let data;
+    // Call backend /query with extended timeout (no mock fallback)
+    const timeoutMs = Number(process.env.QUERY_TIMEOUT_MS || process.env.BACKEND_TIMEOUT_MS || 120000);
+    let data: any | null = null;
     try {
       const res = await fetch(`${API_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: message, top_k, max_images }),
         cache: 'no-store',
-        signal: AbortSignal.timeout(5000), // 5 second timeout
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
+      const text = await res.text();
       if (!res.ok) {
-        console.warn(`Backend returned ${res.status}, using mock response`);
-        // Fall back to mock response
-      } else {
-        data = await res.json();
+        try {
+          const errData = JSON.parse(text);
+          return NextResponse.json(errData, { status: res.status });
+        } catch {
+          return NextResponse.json({ error: text || `Backend error (${res.status})` }, { status: res.status });
+        }
       }
+      data = JSON.parse(text);
     } catch (backendErr) {
-      console.warn('Backend service unavailable, using mock response:', backendErr);
-      // Fall back to mock response
-    }
-
-    // Use mock data if backend call failed
-    if (!data) {
-      data = {
-        answer: `This is a mock response to your question: "${message}". The backend service is currently unavailable, but the frontend is working correctly.`,
-        hits: [
-          { page_id: "mock_page_1", score: 0.95 },
-          { page_id: "mock_page_2", score: 0.89 }
-        ]
-      };
+      console.error('Backend service error:', backendErr);
+      return NextResponse.json(
+        { error: 'Backend service unavailable', details: backendErr instanceof Error ? backendErr.message : String(backendErr) },
+        { status: 502 }
+      );
     }
 
     const answer: string = data?.answer ?? '';

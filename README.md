@@ -82,7 +82,7 @@ src/
    Create a `.env.local` file in the root directory:
    ```bash
    # When running Next.js locally, connect to Docker services
-   RETRIEVER_URL=http://localhost:8081
+   RETRIEVER_URL=http://localhost:8080
    ```
 
 4. **Run the development server:**
@@ -92,6 +92,37 @@ src/
 
 5. **Open your browser:**
    Navigate to [http://localhost:3000](http://localhost:3000)
+
+### Monolith Backend (Single File)
+
+You can run the entire backend (retriever + API gateway) from a single FastAPI app:
+
+Python (host):
+```bash
+pip install -r services/api/requirements.txt python-json-logger
+uvicorn backend:app --host 0.0.0.0 --port 8080
+```
+
+Docker (single image):
+```bash
+cd deployment
+docker build -f monolith.Dockerfile -t visionrag-monolith ..
+docker run --rm -p 8080:8080 \
+  -e VLM_BASE_URL=http://host.docker.internal:11434/v1 \
+  -e VLM_MODEL=qwen2.5-vl:7b \
+  -e TOP_K=5 -e MAX_IMAGES=3 \
+  -v $(pwd)/../local_data:/app/local_data \
+  --add-host host.docker.internal:host-gateway \
+  visionrag-monolith
+```
+
+Endpoints:
+- Health: `GET /healthz`
+- Ingest: `POST /ingest` { pages: [{ page_id, image_b64 }] }
+- Search: `POST /search` { text, top_k }
+- Query: `POST /query` { question, top_k, max_images }
+
+Front-end can keep using `/api/chat` and `/api/ingest` as-is when running Next.js; or directly call the monolith endpoints if you prefer.
 
 ### Docker Deployment
 
@@ -114,7 +145,7 @@ To run the entire application stack (frontend, backend API, and retriever) in Do
    MAX_IMAGES=3
 
    # For local development (when Next.js runs outside Docker)
-   RETRIEVER_URL=http://localhost:8081
+   RETRIEVER_URL=http://localhost:8080
    ```
 
 3. **Build and run the entire stack:**
@@ -130,7 +161,6 @@ To run the entire application stack (frontend, backend API, and retriever) in Do
 4. **Access the application:**
    - Frontend: [http://localhost:3000](http://localhost:3000)
    - Backend API: [http://localhost:8080](http://localhost:8080)
-   - Retriever: [http://localhost:8081](http://localhost:8081)
 
 ### Services Architecture
 
@@ -140,6 +170,19 @@ To run the entire application stack (frontend, backend API, and retriever) in Do
   - `mock` (default): in-memory + filesystem store, deterministic ranking; no external deps
   - `milvus-lite`: simple NumPy embeddings + Milvus vector search; no heavy ML
 - **VLM**: External Ollama service for vision-language model inference
+
+### Ollama (Vision Model) Setup
+
+Ensure Ollama is running on the host and the Qwen model is available before using chat:
+
+```bash
+ollama serve
+ollama pull qwen2.5-vl:7b
+```
+
+Notes:
+- The first response may be slow due to model warm-up.
+- The API container is configured to reach the host via `host.docker.internal` and includes an `extra_hosts` entry for Linux.
 
 ### Environment Variables
 
@@ -152,12 +195,13 @@ To run the entire application stack (frontend, backend API, and retriever) in Do
 | `TOP_K` | Number of top results to retrieve | `5` |
 | `MAX_IMAGES` | Maximum images to include in responses | `3` |
 | `VLM_BASE_URL` | URL for the VLM service | `http://host.docker.internal:11434/v1` |
+| `VLM_TIMEOUT_SEC` | Timeout for server->Ollama calls (seconds) | `180` |
 | `VLM_MODEL` | Vision-language model to use | `qwen2.5-vl:7b` |
 
 ## API Integration
 
 ### Current Implementation
-The app currently uses mock responses for demonstration. The API endpoint (`/api/chat/route.ts`) simulates streaming responses with realistic delays.
+The chat endpoint now proxies to the FastAPI backend and will surface real errors if the backend or VLM is unavailable. No mock fallbacks are used in production paths.
 
 ### OpenAI Integration
 To integrate with OpenAI's API:
@@ -246,7 +290,7 @@ The app can be deployed to any platform that supports Next.js:
 1. **Build failures**: Ensure you have enough disk space and Docker Desktop is running
 2. **Service not starting**: Check logs with `docker compose logs [service-name]`
 3. **Port conflicts**: If ports 3000, 8080, or 8081 are in use, stop conflicting services
-4. **VLM connection issues**: Ensure Ollama is running locally and accessible at `http://host.docker.internal:11434`
+4. **VLM connection issues**: Ensure Ollama is running locally and accessible at `http://host.docker.internal:11434`. From inside the `api` container, you should be able to `curl http://host.docker.internal:11434`.
 5. **Memory issues**: Increase Docker Desktop memory allocation if builds fail (Milvus needs ≥8GB RAM)
 6. **Apple Silicon**: All services use `platform: linux/arm64` for compatibility
 
@@ -279,12 +323,12 @@ The app can be deployed to any platform that supports Next.js:
    nc -zv 127.0.0.1 19530
 
    # From retriever container:
-   docker compose exec retriever python -c "from pymilvus import MilvusClient; print(MilvusClient('http://milvus:19530').list_collections())"
+   docker compose exec backend python -c "from pymilvus import MilvusClient; print(MilvusClient('http://milvus:19530').list_collections())"
    ```
 
 4. **Check health endpoint:**
    ```bash
-   curl http://localhost:8081/healthz
+   curl http://localhost:8080/healthz
    # Should show: "milvus_connected": true
    ```
 
@@ -342,6 +386,18 @@ If you just want to exercise the retriever and API locally without Docker:
   - `uvicorn services.api.main:app --host 0.0.0.0 --port 8080`
 - Run the demo script to ingest a generated image, search it, and query the API:
   - `python3 scripts/demo_ingest_and_query.py`
+
+### Testing the VLM call manually
+
+After starting Ollama and pulling the model, you can run a quick test against the VLM endpoint directly from the host:
+
+```bash
+export VLM_BASE_URL=http://localhost:11434/v1
+export VLM_MODEL=qwen2.5-vl:7b
+python3 scripts/test_ollama_call.py
+```
+
+If running inside Docker, ensure `VLM_BASE_URL` is set to `http://host.docker.internal:11434/v1` in the `api` service.
 
 Notes:
 - The retriever runs in a mock mode by default (no Milvus/ML required). It stores assets under `./local_data` when `/data` is not writable.

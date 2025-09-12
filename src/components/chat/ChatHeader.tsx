@@ -34,12 +34,17 @@ export function ChatHeader({ onClearMessages, messageCount }: ChatHeaderProps) {
       e.target.value = '';
       return;
     }
-    const docId = `${file.name.replace(/\.[^/.]+$/, '')}`;
+    const base = file.name.replace(/\.[^/.]+$/, '');
+    const docId = `${base}-${Date.now()}`;
     try {
-      await ingestPdf(file, docId);
+      const res = await ingestPdf(file, docId);
+      if (res && typeof res.pages_added === 'number') {
+        alert(`Ingested ${res.pages_added} pages from ${file.name}`);
+      }
     } catch (err) {
       console.error(err);
-      alert('Failed to ingest PDF.');
+      const msg = err instanceof Error ? err.message : 'Failed to ingest PDF.';
+      alert(msg);
     } finally {
       e.target.value = '';
     }

@@ -13,7 +13,7 @@ import requests
 from PIL import Image
 
 
-RETRIEVER_URL = os.getenv("RETRIEVER_URL", "http://localhost:8081").rstrip("/")
+RETRIEVER_URL = os.getenv("RETRIEVER_URL", "http://localhost:8080").rstrip("/")
 API_URL = os.getenv("BACKEND_API_URL", os.getenv("API_URL", "http://localhost:8080")).rstrip("/")
 
 
@@ -48,7 +48,8 @@ def demo_ingest(doc_id: str = "demoDoc") -> str:
     b64 = to_b64_jpeg(img)
     page_id = f"{doc_id}:1"
     payload = {"pages": [{"page_id": page_id, "image_b64": b64}]}
-    r = requests.post(f"{RETRIEVER_URL}/ingest", json=payload, timeout=10)
+    # First run may download CLIP model; allow generous timeout
+    r = requests.post(f"{RETRIEVER_URL}/ingest", json=payload, timeout=180)
     r.raise_for_status()
     print("ingest:", r.status_code, r.json())
     return page_id
@@ -94,4 +95,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -6,4 +6,5 @@ pymilvus==2.4.6
 numpy==1.26.4
 requests==2.32.3
 marshmallow>=3.13,<4.0
+python-json-logger==2.0.7
 

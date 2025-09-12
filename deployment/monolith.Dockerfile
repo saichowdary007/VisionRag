@@ -10,15 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 libjpeg62-turbo build-essential gcc curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies required for retriever service
-COPY services/retriever/requirements.txt /app/requirements.txt
+COPY services/api/requirements.txt /app/requirements.txt
 RUN pip install -r /app/requirements.txt \
-    && pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
+    && pip install python-json-logger
 
 COPY . /app
 
-EXPOSE 8081
+EXPOSE 8080
 
-CMD ["uvicorn", "services.retriever.main:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8080"]
 
 

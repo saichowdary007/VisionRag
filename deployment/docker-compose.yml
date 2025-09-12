@@ -62,10 +62,10 @@ services:
         condition: service_healthy
     platform: linux/arm64
 
-  retriever:
+  backend:
     build:
       context: ../
-      dockerfile: ./deployment/retriever.Dockerfile
+      dockerfile: ./deployment/monolith.Dockerfile
     environment:
       - MODEL_ID=${MODEL_ID:-vidore/colpali-v1.3}
       - MILVUS_URI=http://milvus:19530
@@ -76,38 +76,30 @@ services:
       - LOCAL_DATA_DIR=/data_local
       - RETRIEVER_MODE=${RETRIEVER_MODE:-mock}
       - EMBED_DIM=${EMBED_DIM:-64}
+      - VLM_BASE_URL=${VLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      - VLM_MODEL=${VLM_MODEL}
+      - MAX_IMAGES=${MAX_IMAGES:-3}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       milvus:
         condition: service_healthy
     platform: linux/arm64
     ports:
-      - "8081:8081"
-
-  api:
-    build:
-      context: ../
-      dockerfile: ./deployment/api.Dockerfile
-    environment:
-      - RETRIEVER_URL=http://retriever:8081
-      - VLM_BASE_URL=${VLM_BASE_URL}
-      - VLM_MODEL=${VLM_MODEL}
-      - TOP_K=${TOP_K:-5}
-      - MAX_IMAGES=${MAX_IMAGES:-3}
-    depends_on:
-      - retriever
-    platform: linux/arm64
-    ports:
       - "8080:8080"
+    volumes:
+      - visionrag_data:/data
+      - visionrag_local:/data_local
 
   frontend:
     build:
       context: ../
       dockerfile: ./deployment/frontend.Dockerfile
     environment:
-      - BACKEND_API_URL=http://api:8080
-      - RETRIEVER_URL=http://retriever:8081
+      - BACKEND_API_URL=http://backend:8080
+      - RETRIEVER_URL=http://backend:8080
     depends_on:
-      - api
+      - backend
     platform: linux/arm64
     ports:
       - "3000:3000"
@@ -116,3 +108,5 @@ volumes:
   etcd:
   minio:
   milvus:
+  visionrag_data:
+  visionrag_local:
