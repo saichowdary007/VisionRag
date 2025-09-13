@@ -1,0 +1,29 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies including GPU libraries
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libglib2.0-0 \
+    libgomp1 \
+    libgthread-2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+# Install PyTorch with MPS support for Apple Silicon
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir transformers colpali-engine && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY services/api_service.py .
+COPY libs/ ./libs/
+
+# Create directories
+RUN mkdir -p pages
+
+EXPOSE 8000
+
+CMD ["uvicorn", "api_service:app", "--host", "0.0.0.0", "--port", "8000"]
