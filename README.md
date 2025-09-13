@@ -32,26 +32,47 @@ A production-grade RAG (Retrieval-Augmented Generation) vision pipeline built wi
 ```
 src/
 ├── app/
-│   ├── api/chat/route.ts      # Chat API endpoint with streaming
-│   ├── globals.css            # Global styles and theme variables
-│   ├── layout.tsx             # Root layout component
-│   └── page.tsx               # Main page component
+│   ├── api/
+│   │   ├── chat/route.ts       # Chat API endpoint with streaming
+│   │   ├── health/route.ts     # Health check endpoint
+│   │   ├── ingest/route.ts     # Document ingestion endpoint
+│   │   └── reindex/route.ts    # Reindexing endpoint
+│   ├── globals.css             # Global styles and theme variables
+│   ├── layout.tsx              # Root layout component
+│   └── page.tsx                # Main page component
 ├── components/
 │   ├── chat/
-│   │   ├── ChatContainer.tsx  # Main chat container
-│   │   ├── ChatHeader.tsx     # Header with controls
-│   │   ├── MessageBubble.tsx  # Individual message component
-│   │   └── MessageInput.tsx   # Message input with auto-resize
+│   │   ├── ChatContainer.tsx   # Main chat container
+│   │   ├── ChatHeader.tsx      # Header with controls
+│   │   ├── MessageBubble.tsx   # Individual message component
+│   │   └── MessageInput.tsx    # Message input with auto-resize
 │   └── ui/
-│       ├── Button.tsx         # Reusable button component
+│       ├── Button.tsx          # Reusable button component
 │       └── TypingIndicator.tsx # Animated typing indicator
 ├── hooks/
-│   ├── useChat.ts             # Chat state management
-│   └── useTheme.ts            # Theme management
+│   ├── useChat.ts              # Chat state management
+│   ├── useIngest.ts            # Document ingestion hook
+│   └── useTheme.ts             # Theme management
 ├── lib/
-│   └── utils.ts               # Utility functions
+│   └── utils.ts                # Utility functions
 └── types/
-    └── chat.ts                # TypeScript interfaces
+    └── chat.ts                 # TypeScript interfaces
+
+services/
+├── api_service.py              # Consolidated API service with ColPali and VLM
+└── ingestion_service.py        # Document processing and vector indexing
+
+libs/
+├── clients/
+│   └── vlm_client.py           # Vision-Language Model client
+└── storage/
+    └── milvus_store.py         # Milvus vector database operations
+
+deployment/
+├── docker-compose.yml          # Multi-service Docker deployment
+├── Dockerfile.api              # API service container
+├── Dockerfile.ingestion        # Ingestion service container
+└── frontend.Dockerfile         # Frontend container
 ```
 
 ## Getting Started
@@ -68,12 +89,8 @@ src/
    npm install
    ```
 
-2. **Start Docker services (Milvus, retriever, API):**
+2. **Start Docker services (Milvus, API, Ingestion):**
    ```bash
-   # Start all services in background
-   ./run-docker.sh
-
-   # Or manually:
    cd deployment
    docker compose up -d
    ```
@@ -82,7 +99,7 @@ src/
    Create a `.env.local` file in the root directory:
    ```bash
    # When running Next.js locally, connect to Docker services
-   RETRIEVER_URL=http://localhost:8080
+   BACKEND_API_URL=http://localhost:8000
    ```
 
 4. **Run the development server:**
@@ -93,40 +110,35 @@ src/
 5. **Open your browser:**
    Navigate to [http://localhost:3000](http://localhost:3000)
 
-### Monolith Backend (Single File)
+### Backend Services
 
-You can run the entire backend (retriever + API gateway) from a single FastAPI app:
+The backend consists of two main services:
 
-Python (host):
+**API Service** (`services/api_service.py`):
+- Combined ColPali retrieval and VLM chat functionality
+- FastAPI endpoints for chat, health checks, and reindexing
+- Runs on port 8000
+
+**Ingestion Service** (`services/ingestion_service.py`):
+- Document processing and vector indexing
+- PDF to image conversion and ColPali embedding generation
+- One-time execution for document ingestion
+
+To run the API service locally:
 ```bash
-pip install -r services/api/requirements.txt python-json-logger
-uvicorn backend:app --host 0.0.0.0 --port 8080
+pip install -r requirements.txt
+python services/api_service.py
 ```
 
-Docker (single image):
+To run document ingestion:
 ```bash
-cd deployment
-docker build -f monolith.Dockerfile -t visionrag-monolith ..
-docker run --rm -p 8080:8080 \
-  -e VLM_BASE_URL=http://host.docker.internal:11434/v1 \
-  -e VLM_MODEL=qwen2.5-vl:7b \
-  -e TOP_K=5 -e MAX_IMAGES=3 \
-  -v $(pwd)/../local_data:/app/local_data \
-  --add-host host.docker.internal:host-gateway \
-  visionrag-monolith
+pip install -r requirements.txt
+python services/ingestion_service.py
 ```
-
-Endpoints:
-- Health: `GET /healthz`
-- Ingest: `POST /ingest` { pages: [{ page_id, image_b64 }] }
-- Search: `POST /search` { text, top_k }
-- Query: `POST /query` { question, top_k, max_images }
-
-Front-end can keep using `/api/chat` and `/api/ingest` as-is when running Next.js; or directly call the monolith endpoints if you prefer.
 
 ### Docker Deployment
 
-To run the entire application stack (frontend, backend API, and retriever) in Docker:
+To run the entire application stack (frontend, API service, ingestion service, and Milvus) in Docker:
 
 1. **Ensure Docker and Docker Compose are installed**
 
@@ -137,38 +149,41 @@ To run the entire application stack (frontend, backend API, and retriever) in Do
    VLM_BASE_URL=http://host.docker.internal:11434/v1
    VLM_MODEL=qwen2.5-vl:7b
 
-   # Retriever Configuration (for Docker services)
-   MODEL_ID=vidore/colpali-v1.3
-   MILVUS_URI=http://milvus:19530  # Use service name when in Docker network
-   COLLECTION_NAME=colpali_multivector_collection
+   # API Service Configuration
+   RETRIEVER_MODEL_ID=vidore/colpali-v1.3
+   MILVUS_URI=http://milvus:19530
+   COLLECTION_NAME=rag_vision_collection
    TOP_K=5
    MAX_IMAGES=3
 
-   # For local development (when Next.js runs outside Docker)
-   RETRIEVER_URL=http://localhost:8080
+   # Ingestion Service Configuration
+   SOURCE_DOCS_DIR=/app/documents
+   PAGE_IMAGE_DIR=/app/pages
+   DIMENSION=128
    ```
 
 3. **Build and run the entire stack:**
    ```bash
-   # Option 1: Use the convenience script (recommended)
-   ./run-docker.sh
-
-   # Option 2: Manual commands
    cd deployment
    docker compose up --build
    ```
 
-4. **Access the application:**
+4. **Run document ingestion (one-time):**
+   ```bash
+   cd deployment
+   docker compose --profile ingestion run --rm ingestion_service
+   ```
+
+5. **Access the application:**
    - Frontend: [http://localhost:3000](http://localhost:3000)
-   - Backend API: [http://localhost:8080](http://localhost:8080)
+   - API Service: [http://localhost:8000](http://localhost:8000)
 
 ### Services Architecture
 
-- **Frontend**: Next.js application with PDF upload and chat interface
-- **API Gateway**: FastAPI service that orchestrates queries and responses
-- **Retriever**: FastAPI service with two modes:
-  - `mock` (default): in-memory + filesystem store, deterministic ranking; no external deps
-  - `milvus-lite`: simple NumPy embeddings + Milvus vector search; no heavy ML
+- **Frontend**: Next.js application with document upload and chat interface
+- **API Service**: Consolidated FastAPI service combining retrieval and chat functionality
+- **Ingestion Service**: Document processing service for PDF conversion and vector indexing
+- **Milvus**: Vector database for document embeddings and similarity search
 - **VLM**: External Ollama service for vision-language model inference
 
 ### Ollama (Vision Model) Setup
@@ -188,20 +203,37 @@ Notes:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `RETRIEVER_MODE` | Retriever mode: `mock` or `milvus-lite` | `mock` |
 | `EMBED_DIM` | Dimension for lite embeddings (square number) | `64` |
 | `MILVUS_URI` | Milvus database URI | `http://milvus:19530` |
-| `MODEL_ID` | (Reserved for future ML mode) | `vidore/colpali-v1.3` |
+| `RETRIEVER_MODEL_ID` | ColPali model for document retrieval | `vidore/colpali-v1.3` |
 | `TOP_K` | Number of top results to retrieve | `5` |
 | `MAX_IMAGES` | Maximum images to include in responses | `3` |
 | `VLM_BASE_URL` | URL for the VLM service | `http://host.docker.internal:11434/v1` |
 | `VLM_TIMEOUT_SEC` | Timeout for server->Ollama calls (seconds) | `180` |
 | `VLM_MODEL` | Vision-language model to use | `qwen2.5-vl:7b` |
 
+## API Endpoints
+
+The application provides several API endpoints for chat, document ingestion, health monitoring, and system management:
+
+### Frontend API Endpoints
+
+- **`GET /api/health`** - Health check endpoint that proxies to the backend service
+- **`POST /api/chat`** - Chat endpoint with streaming responses for RAG queries
+- **`POST /api/ingest`** - Document ingestion endpoint for uploading and processing PDFs
+- **`POST /api/reindex`** - Reindexing endpoint to rebuild vector embeddings
+
+### Backend API Endpoints (Direct)
+
+- **`GET /healthz`** - System health check including Milvus connectivity
+- **`POST /chat`** - Direct chat endpoint with vision-language model integration
+- **`POST /ingest`** - Direct document ingestion with image processing
+- **`POST /reindex`** - Force reindexing of all documents in the system
+
 ## API Integration
 
 ### Current Implementation
-The chat endpoint now proxies to the FastAPI backend and will surface real errors if the backend or VLM is unavailable. No mock fallbacks are used in production paths.
+The frontend API endpoints proxy to the consolidated FastAPI backend service and will surface real errors if the backend or VLM is unavailable.
 
 ### OpenAI Integration
 To integrate with OpenAI's API:
@@ -300,7 +332,7 @@ The app can be deployed to any platform that supports Next.js:
 
 **Symptoms:**
 - 500 errors when uploading documents
-- Retriever service fails to start
+- API service fails to start
 - Connection timeout errors
 
 **Solutions:**
@@ -322,13 +354,13 @@ The app can be deployed to any platform that supports Next.js:
    # From host (when Next.js runs locally):
    nc -zv 127.0.0.1 19530
 
-   # From retriever container:
-   docker compose exec backend python -c "from pymilvus import MilvusClient; print(MilvusClient('http://milvus:19530').list_collections())"
+   # From API service container:
+   docker compose exec api python -c "from pymilvus import MilvusClient; print(MilvusClient('http://milvus:19530').list_collections())"
    ```
 
 4. **Check health endpoint:**
    ```bash
-   curl http://localhost:8080/healthz
+   curl http://localhost:8000/health
    # Should show: "milvus_connected": true
    ```
 
@@ -376,31 +408,19 @@ docker compose down --volumes --remove-orphans
 - [ ] Message reactions
 - [ ] User authentication
 - [ ] Real-time collaboration
-### Local Demo (No Docker)
+### Testing Locally
 
-If you just want to exercise the retriever and API locally without Docker:
-
-- Start retriever in one terminal:
-  - `uvicorn services.retriever.main:app --host 0.0.0.0 --port 8081`
-- Start API gateway in another terminal:
-  - `uvicorn services.api.main:app --host 0.0.0.0 --port 8080`
-- Run the demo script to ingest a generated image, search it, and query the API:
-  - `python3 scripts/demo_ingest_and_query.py`
-
-### Testing the VLM call manually
-
-After starting Ollama and pulling the model, you can run a quick test against the VLM endpoint directly from the host:
+After starting Ollama and pulling the model, you can test the VLM integration:
 
 ```bash
 export VLM_BASE_URL=http://localhost:11434/v1
 export VLM_MODEL=qwen2.5-vl:7b
-python3 scripts/test_ollama_call.py
+python3 -c "from libs.clients.vlm_client import vision_chat; print('VLM connection test:', vision_chat('Hello'))"
 ```
 
 If running inside Docker, ensure `VLM_BASE_URL` is set to `http://host.docker.internal:11434/v1` in the `api` service.
 
 Notes:
-- The retriever runs in a mock mode by default (no Milvus/ML required). It stores assets under `./local_data` when `/data` is not writable.
-- The API will fall back to a safe mock answer if the VLM is unavailable.
-5. **Switch retriever mode (optional):**
-   - Default is `mock`. For Milvus-backed lite retrieval, set `RETRIEVER_MODE=milvus-lite` in your `.env` and re-run compose. Ensure Milvus is healthy first.
+- The ingestion service processes documents and creates vector embeddings in Milvus
+- The API service handles both retrieval and chat functionality
+- The system will fall back gracefully if the VLM is unavailable
