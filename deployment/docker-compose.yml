@@ -40,43 +40,6 @@ services:
       - minio_data:/data
     command: minio server /data --console-address ":9001"
 
-  # RAG Vision API Service
-  api_service:
-    build:
-      context: ../
-      dockerfile: ./deployment/Dockerfile.api
-    ports:
-      - "8000:8000"
-    environment:
-      - RETRIEVER_MODEL_ID=vidore/colpali-v1.3
-      - MILVUS_URI=http://milvus:19530
-      - COLLECTION_NAME=rag_vision_collection
-      - QA_API_BASE=http://host.docker.internal:11434
-      - QA_API_KEY=EMPTY
-      - QA_MODEL_ID=qwen3:4b-instruct-2507-q4_K_M
-      - TOP_K_CANDIDATES=50
-      - TOP_K_FINAL=3
-      - USE_MILVUS=true
-      - VLM_BASE_URL=http://host.docker.internal:11434
-      - VLM_MODEL=qwen3:4b-instruct-2507-q4_K_M
-      - INDEX_ON_INGEST=false
-      # Apple Silicon Configuration (CPU mode in Docker)
-      # Note: MPS only works when running natively on macOS, not in Linux containers
-      # For MPS acceleration, run the application natively: python services/api_service.py
-      - DEVICE=cpu  # Use CPU in Docker container (MPS not available in Linux containers)
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ../pages:/app/pages
-    # Apple Silicon MPS Device Access (M1 Pro/Max/Ultra)
-    # Note: MPS (Metal Performance Shaders) works automatically on Apple Silicon
-    # No explicit device mapping needed - Docker will use host MPS automatically
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: mps  # For Apple Silicon (automatically handled)
-
   # Ingestion Service (run once)
   ingestion_service:
     build:
@@ -96,18 +59,18 @@ services:
     profiles:
       - ingestion  # Only run when explicitly requested
 
-  # Frontend (unchanged)
+  # Frontend
   frontend:
     build:
       context: ../
       dockerfile: ./deployment/frontend.Dockerfile
     environment:
-      - BACKEND_API_URL=http://api_service:8000
+      - BACKEND_API_URL=http://host.docker.internal:8000
       - INGEST_TIMEOUT_MS=300000
       - RETRIEVER_TIMEOUT_MS=300000
       - QUERY_TIMEOUT_MS=180000
-    depends_on:
-      - api_service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     platform: linux/arm64
     ports:
       - "3000:3000"
