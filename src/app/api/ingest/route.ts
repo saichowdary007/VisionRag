@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Retriever service URL (FastAPI retriever)
-// When running Next.js locally (npm run dev), connect to Docker services on localhost
-// When running in Docker, use service names
-const RETRIEVER_URL = (process.env.RETRIEVER_URL || 'http://localhost:8080').replace(/\/$/, '');
+// Retriever/API base URL
+// Prefer RETRIEVER_URL if explicitly set; otherwise fall back to BACKEND_API_URL,
+// and finally a sane localhost default for local dev.
+const RETRIEVER_URL = (
+  process.env.RETRIEVER_URL ||
+  process.env.BACKEND_API_URL ||
+  'http://localhost:8000'
+).replace(/\/$/, '');
 
 // Accept JSON body: { pages: [{ page_id: string, image_b64: string }] }
 // Proxies to retriever /ingest without mock fallback; surfaces real errors
@@ -19,7 +23,7 @@ export async function POST(request: NextRequest) {
 
     try {
       // Call the retriever service with extended timeout (configurable)
-      const timeoutMs = Number(process.env.INGEST_TIMEOUT_MS || process.env.RETRIEVER_TIMEOUT_MS || 60000);
+      const timeoutMs = Number(process.env.INGEST_TIMEOUT_MS || process.env.RETRIEVER_TIMEOUT_MS || 180000);
       const res = await fetch(`${RETRIEVER_URL}/ingest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -64,4 +68,3 @@ export async function POST(request: NextRequest) {
     }, { status: 500 });
   }
 }
-

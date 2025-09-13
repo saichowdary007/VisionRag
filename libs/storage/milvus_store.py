@@ -18,7 +18,8 @@ def get_or_create_collection(client: Any, name: str, dim: int) -> None:
         schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field(field_name="page_id", datatype=DataType.VARCHAR, max_length=1024)
         index_params = client.prepare_index_params()
-        index_params.add_index(field_name="vector", metric_type="IP")
+        # AUTOINDEX lets Milvus choose the best index for the data
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="IP")
         client.create_collection(
             collection_name=name,
             schema=schema,

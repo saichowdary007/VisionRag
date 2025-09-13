@@ -1,6 +1,6 @@
-# ChatGPT-Style Chat Application
+# RAG Vision Pipeline
 
-A modern, responsive chat interface built with Next.js 14+, TypeScript, and Tailwind CSS. This application mimics the ChatGPT user experience with real-time message streaming, dark/light theme support, and persistent message history.
+A production-grade RAG (Retrieval-Augmented Generation) vision pipeline built with ColPali for multi-vector document retrieval and vision-language models for question answering. Features a modern Next.js frontend with real-time streaming responses.
 
 ## Features
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { MessageSquare, Sun, Moon, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useTheme } from '@/hooks/useTheme';
@@ -14,6 +14,10 @@ interface ChatHeaderProps {
 export function ChatHeader({ onClearMessages, messageCount }: ChatHeaderProps) {
   const { theme, toggleTheme } = useTheme();
   const { ingestPdf, progress } = useIngest({ jpegQuality: 0.9, maxPages: 20 });
+  const [retrieverLoaded, setRetrieverLoaded] = useState<boolean | null>(null);
+  const [useMilvus, setUseMilvus] = useState<boolean>(false);
+  const [reindexing, setReindexing] = useState<boolean>(false);
+  const [reindexResult, setReindexResult] = useState<string | null>(null);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -47,6 +51,45 @@ export function ChatHeader({ onClearMessages, messageCount }: ChatHeaderProps) {
       alert(msg);
     } finally {
       e.target.value = '';
+    }
+  };
+
+  // Poll backend health until retriever is loaded
+  useEffect(() => {
+    let timer: any;
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/health', { cache: 'no-store' });
+        const data = await res.json();
+        setRetrieverLoaded(Boolean(data?.retriever_loaded));
+        setUseMilvus(Boolean(data?.use_milvus));
+        if (!data?.retriever_loaded) {
+          timer = setTimeout(tick, 5000);
+        }
+      } catch (e) {
+        setRetrieverLoaded(null);
+        timer = setTimeout(tick, 7000);
+      }
+    };
+    tick();
+    return () => timer && clearTimeout(timer);
+  }, []);
+
+  const handleReindex = async () => {
+    setReindexing(true);
+    setReindexResult(null);
+    try {
+      const res = await fetch('/api/reindex', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setReindexResult(`Indexed ${data?.pages_added ?? 0} pages`);
+      } else {
+        setReindexResult(typeof data?.error === 'string' ? data.error : 'Reindex failed');
+      }
+    } catch (e) {
+      setReindexResult(e instanceof Error ? e.message : 'Reindex failed');
+    } finally {
+      setReindexing(false);
     }
   };
 
@@ -125,6 +168,37 @@ export function ChatHeader({ onClearMessages, messageCount }: ChatHeaderProps) {
           )}
           {progress.status === 'error' && progress.error && (
             <span className="text-red-500"> — {progress.error}</span>
+          )}
+        </div>
+      )}
+
+      {useMilvus && (
+        <div className="mt-3">
+          {retrieverLoaded === false && (
+            <div className="flex items-center justify-between text-xs rounded-md px-3 py-2 bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
+              <div>
+                <span className="font-medium">Indexing not ready:</span> Retriever is loading. Uploaded pages will be indexed once ready.
+              </div>
+              <div className="ml-3 animate-pulse">Loading…</div>
+            </div>
+          )}
+          {retrieverLoaded === true && (
+            <div className="flex items-center justify-between text-xs rounded-md px-3 py-2 bg-blue-50 text-blue-800 dark:bg-blue-900/20 dark:text-blue-200 border border-blue-200 dark:border-blue-800">
+              <div>
+                <span className="font-medium">Retriever ready.</span> You can index previously uploaded pages.
+                {reindexResult && (
+                  <span className="ml-2">{reindexResult}</span>
+                )}
+              </div>
+              <button
+                onClick={handleReindex}
+                disabled={reindexing}
+                className={`ml-3 inline-flex items-center px-2 py-1 rounded border text-xs ${reindexing ? 'opacity-60 cursor-not-allowed' : 'hover:bg-blue-100 dark:hover:bg-blue-800/30'} border-blue-300 dark:border-blue-700`}
+                title="Index saved pages"
+              >
+                {reindexing ? 'Indexing…' : 'Reindex now'}
+              </button>
+            </div>
           )}
         </div>
       )}
