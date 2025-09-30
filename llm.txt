@@ -1,0 +1,94 @@
+# RAG Vision — Minimal LLM Context
+
+## Goal
+Build a local-first multimodal RAG app:
+- Ingest PDFs → render pages → ColPali multi-vector embeddings → Milvus
+- Ask questions → retrieve + MaxSim rerank → Qwen2.5-VL answers (via Ollama)
+- Pretty single-page frontend: upload + chat + source thumbnails
+- Apple Silicon (MPS) + Docker prod
+
+## Tech
+- Python: FastAPI, pdf2image/Pillow, pymilvus, colpali-engine, openai client
+- Retriever: vidore/colpali-v1.3 (128d, 1024 patches/page)
+- QA: qwen2.5-vl:7b (Ollama)
+- Vector DB: Milvus (local/compose)
+- Frontend: static index.html (vanilla JS)
+
+## Tree
+rag_vision_project/
+  services/
+    ingestion_service.py        # PDFs → pages → embeddings → Milvus
+    api_service.py              # /upload, /ask, serves index + /pages/*
+  deployment/
+    Dockerfile.ingestion
+    Dockerfile.api
+    docker-compose.yml
+  documents/                    # uploaded PDFs
+  pages/                        # rendered page PNGs
+  index.html                    # front-end (upload + chat)
+  requirements.txt
+
+## Endpoints
+- GET  `/`                 → serve index.html
+- POST `/upload`           → {file: PDF} → saves, splits to PNGs, embeds, inserts vectors
+- POST `/ask`              → {query} → retrieve+rerank → Qwen2.5-VL → {answer,sources[]}
+- GET  `/pages/<file>`     → static page thumbnails
+- GET  `/health`           → status ok
+
+## Env (read by api_service.py)
+- MILVUS_URI=tcp://milvus:19530  (compose) | milvus.db (local lite)
+- COLLECTION_NAME=rag_vision_collection
+- QA_API_BASE=http://host.docker.internal:11434/v1
+- QA_API_KEY=ollama
+- QA_MODEL_ID=qwen2.5-vl:7b
+- RETRIEVER_MODEL_ID=vidore/colpali-v1.3
+- TOP_K_CANDIDATES=50
+- TOP_K_FINAL=3
+- IMAGE_DPI=200
+
+## Docker (compose)
+services:
+  milvus: milvusdb/milvus:v2.4.4
+  api_service:
+    build: deployment/Dockerfile.api
+    ports: 8000:8000
+    env: QA_API_BASE, QA_MODEL_ID, MILVUS_URI, etc.
+    volumes:
+      - ../documents:/app/documents
+      - ../pages:/app/pages
+      - ../index.html:/app/index.html
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [milvus]
+
+## Frontend behavior
+- Drag/drop PDFs → POST /upload (FormData)
+- Chat sends {query} to POST /ask
+- Renders answer + thumbnails from `sources[].source_url` (served from /pages/*)
+
+## Retriever flow (server)
+- embed_query(text) → (1,Q,128)
+- probe = mean(q) → vector search → candidate pages
+- rerank via MaxSim (query tokens × 1024 patch vectors/page)
+- pick top K pages → send as `image_path` to Qwen2.5-VL
+
+## Run (local)
+- Ollama: `ollama pull qwen2.5-vl:7b && ollama serve`
+- Compose: `cd deployment && docker compose up -d --build`
+- Open: http://localhost:8000
+
+## Coding rules for agent
+- Do NOT change API shapes without updating frontend fetch calls
+- Keep `/ask` response: {"answer": str, "sources":[{page,score,source_url}]}
+- When patching Docker/compose, preserve `host.docker.internal` workflow
+- Prefer MPS if available; fallback CUDA → CPU
+
+## Common tasks
+- Add Qdrant option: gate by env, keep Milvus default
+- Batch Milvus inserts in ingestion for speed
+- Add model selector in UI (optional): env drives default
+- Add streaming answers via SSE/WebSocket (optional)
+
+## Non-goals (for now)
+- OCR text extraction (we use visual embeddings)
+- Auth, multi-user tenancy
+- Cloud object storage (local pages dir ok)

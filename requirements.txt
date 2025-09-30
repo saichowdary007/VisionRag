@@ -1,29 +1,11 @@
-# Core ML & Vision
-# Note: PyTorch installed separately in Dockerfile for MPS support
-torchvision>=0.16.0
-transformers>=4.35.0
-
-# PDF Processing
-pdf2image
-Pillow
-
-# Vector Database Client
+# Core dependencies as per llm.txt
+torch
 pymilvus
-
-# ColPali Retriever Engine
-colpali-engine>=0.3.0,<0.4.0
-
-# API Service
 fastapi
 uvicorn[standard]
+pydantic>=2.0.0
 python-multipart
-
-# High-performance Inference (Production) - Now using Ollama
-# vllm
-
-# OpenAI client for interacting with local/prod API
 openai
-
-# Utilities
-tqdm
-numpy
+colpali-engine
+pdf2image
+Pillow
